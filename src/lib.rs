@@ -5,7 +5,9 @@
 
 #![no_std]
 
-use stmems_driver_sys::*;
+mod register;
+
+use embedded_hal::blocking::{i2c, delay::DelayMs};
 
 #[derive(Debug)]
 pub struct Acceleration {
@@ -14,106 +16,130 @@ pub struct Acceleration {
     pub z: f32,
 }
 
-pub struct HardwareContext {
-    pub power: fn(on: bool),
-    pub delay: fn(ms: u32),
-    pub dev_ctx: stmdev_ctx_t,
+#[derive(Clone, Copy)]
+pub enum SlaveADdress {
+    // Whether SDO/SA0 is pulled High or Low
+    Low  = 0b110_1010,
+    High = 0b110_1011,
 }
 
-pub struct Device {
-    hw: HardwareContext,
+pub enum PowerActive<PwrPin: embedded_hal::digital::v2::OutputPin> {
+    High(PwrPin),
+    Low(PwrPin),
+    None
 }
 
-impl Device {
-    pub fn new(hw: HardwareContext) -> Self {
-        hw.dev_ctx.write_reg.expect("write_reg function mising");
-        hw.dev_ctx.read_reg.expect("read_reg function mising");
+pub struct Lsm6dsox<PwrPin, I2C, Delay>
+where
+    PwrPin: embedded_hal::digital::v2::OutputPin,
+    I2C: i2c::Write + i2c::WriteRead,
+    Delay: DelayMs<u32>
+{
+    power: PowerActive<PwrPin>,
+    i2c: I2C,
+    address: SlaveADdress,
+    delay: Delay
+}
 
-        Self { hw: hw }
+
+impl<PwrPin, I2C, Delay> Lsm6dsox<PwrPin, I2C, Delay>
+where
+    PwrPin: embedded_hal::digital::v2::OutputPin,
+    I2C: i2c::Write + i2c::WriteRead,
+    Delay: DelayMs<u32> 
+{
+    pub fn new(power: PowerActive<PwrPin>, i2c: I2C, address: SlaveADdress, delay: Delay) -> Self {
+        Self { power, i2c, address, delay }
     }
 
-    pub fn power(&self, on: bool) {
-        (self.hw.power)(on);
-
-        if on {
-            (self.hw.delay)(10); // 10ms Boot Time as in STs examples
+    pub fn power(&mut self, on: bool) -> Result<(), PwrPin::Error> {
+        // should this method do a delay when turning on the sensor?
+        match (&mut self.power, on) {
+            (PowerActive::High(pp), true) => pp.set_high(),
+            (PowerActive::Low(pp), true) => pp.set_low(),
+            (PowerActive::High(pp), false) => pp.set_low(),
+            (PowerActive::Low(pp), false) => pp.set_high(),
+            (_, _) => Ok(()),
         }
     }
 
-    // Basically all function will burrow self as mut since ST refuses to use the const keyword in their drivers
+    fn update_reg_bits<'a>(&mut self, reg: register::Register, data: u8, bitmask: u8) -> Result<(), &'a str> {  // lifetime has to be annotated so that self wont be borrowed as long as Err(&str) exists
+        let mut buf =[0; 1];
+        self.i2c.write_read(self.address as u8, &[reg as u8], &mut buf).map_err(|_| "i2c-read error")?;
+
+        buf[0] = buf[0] & !bitmask;
+        buf[0] = buf[0] & (data & bitmask);
+
+        let update = [reg as u8, buf[0]];
+        self.i2c.write(self.address as u8, &update).map_err(|_| "i2c-write error") 
+        
+    }  
+
+    // convenience function to execute commands
+    fn update_reg_command<'a>(&mut self, command: register::Command) -> Result<(), &'a str> {
+        self.update_reg_bits(command.register(), command.bits(), command.mask())
+    }
+
     pub fn who_am_i(&mut self) -> Result<(), ()> {
-        let mut whoami: u8 = 0;
+        let mut buf =[0; 1];
 
-        let ret = unsafe { lsm6dsox_device_id_get(&mut self.hw.dev_ctx, &mut whoami) };
-
-        if 0 == ret {
-            if whoami == stmems_driver_sys::LSM6DSOX_ID as u8 {
-                Ok(())
-            } else {
-                Err(())
+        match self.i2c.write_read(self.address as u8, &[register::Register::WHO_AM_I as u8], &mut buf) {
+            Ok(()) => {
+                if buf[0] == 0x6C { Ok(()) }
+                else { Err(())}
             }
-        } else {
-            Err(())
+            Err(_) => {Err(())}
         }
     }
 
     // TODO Add fancy config structure
     pub fn setup(&mut self) -> Result<(), &str> {
-        /* Restore default configuration */
-        unsafe {
-            lsm6dsox_reset_set(&mut self.hw.dev_ctx, PROPERTY_ENABLE as u8);
+
+        self.update_reg_command(register::Command::SwReset)?;
+        
+        // Give it 10 tries. Timeout may be better here...
+        let mut buf = [1; 1];
+        for _ in 0..10 {
+            self.i2c.write_read(self.address as u8, &[register::Register::CTRL3_C as u8], &mut buf).map_err(|_| "i2c-read error")?; 
+            if buf[0] == 0 { break;}
         }
 
-        let mut rst: u8 = 1;
-
-        for _i in 0..10 {
-            // Give it 10 tries. Maybe introduce timeout instead
-            unsafe {
-                lsm6dsox_reset_get(&mut self.hw.dev_ctx, &mut rst);
-            }
-            if rst == 0 {
-                break;
-            }
-        }
-
-        if rst != 0 {
+        if buf[0] != 0 {
             Err("Could not reset to default Config")
         } else {
             /* Disable I3C interface */
-            unsafe {
-                lsm6dsox_i3c_disable_set(
-                    &mut self.hw.dev_ctx,
-                    lsm6dsox_i3c_disable_t_LSM6DSOX_I3C_DISABLE,
-                );
-            }
+            self.update_reg_bits(register::Register::CTRL9_XL, 0x02, 0x02)?;
+            self.update_reg_bits(register::Register::I3C_BUS_AVB, 0x00, 0b0001_1000)?;
+
             /* Enable Block Data Update */
-            unsafe {
-                lsm6dsox_block_data_update_set(&mut self.hw.dev_ctx, PROPERTY_ENABLE as u8);
-            }
+            self.update_reg_bits(register::Register::CTRL3_C, 0b0100_0000, 0b0100_0000)?;
 
             /* Set Output Data Rate */
-            unsafe {
-                lsm6dsox_xl_data_rate_set(
-                    &mut self.hw.dev_ctx,
-                    lsm6dsox_odr_xl_t_LSM6DSOX_XL_ODR_52Hz,
-                );
-            }
+            self.update_reg_command(register::Command::SetDataRate(register::DataRate::ODR_52Hz))?;
+
             /* Set full scale */
-            unsafe {
-                lsm6dsox_xl_full_scale_set(&mut self.hw.dev_ctx, lsm6dsox_fs_xl_t_LSM6DSOX_4g);
-            }
+            self.update_reg_command(register::Command::SetFullScale(register::FullScale::FS_XL_4g))?;
+
             /* Wait stable output */
-            (self.hw.delay)(100);
+            self.delay.delay_ms(100);
 
             Ok(())
         }
+    }
+
+
+    pub fn set_output_data_rate<'a>(&mut self, datarate: register::DataRate) -> Result<(), &'a str> {
+        self.update_reg_command(register::Command::SetDataRate(datarate))
     }
 
     // Simple functions for testing
     // The sensor and its configuration is pretty complex
     // the final implementation would look quite fancy
     pub fn read_acceleration(&mut self) -> Result<Acceleration, &str> {
+
+        Err("not implemented yet")
         /* Check if new value available */
+        /*
         let mut data_rdy: u8 = 0;
         unsafe {
             lsm6dsox_xl_flag_data_ready_get(&mut self.hw.dev_ctx, &mut data_rdy);
@@ -133,6 +159,6 @@ impl Device {
                 y: unsafe { lsm6dsox_from_fs4_to_mg(data_raw[1]) } as f32,
                 z: unsafe { lsm6dsox_from_fs4_to_mg(data_raw[2]) } as f32,
             })
-        }
+        } */
     }
 }
