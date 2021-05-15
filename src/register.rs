@@ -3,6 +3,10 @@
 // Licensed under the Open Logistics License 1.0.
 // For details on the licensing terms, see the LICENSE file.
 
+/// Registers which are accessible from the primary SPI/I2C/MIPI I3C interfaces.
+/// 
+/// **Note:** These Register names correspond to the normal function registers.
+/// When embedded function access is enabled in `FUNC_CFG_ACCESS` these adresses correspond to different registers.
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
