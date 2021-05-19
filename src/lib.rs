@@ -5,8 +5,10 @@
 
 #![no_std]
 
-mod register;
+pub mod register;
+use register::*;
 
+use byteorder::{ByteOrder, LittleEndian};
 use embedded_hal::blocking::{i2c, delay::DelayMs};
 
 /// Acceleration measurement result
@@ -80,7 +82,7 @@ where
         }
     }
 
-    fn update_reg_bits<'a>(&mut self, reg: register::Register, data: u8, bitmask: u8) -> Result<(), &'a str> {  // lifetime has to be annotated so that self wont be borrowed as long as Err(&str) exists
+    fn update_reg_bits<'a>(&mut self, reg: Register, data: u8, bitmask: u8) -> Result<(), &'a str> {  // lifetime has to be annotated so that self wont be borrowed as long as Err(&str) exists
         let mut buf =[0; 1];
         self.i2c.write_read(self.address as u8, &[reg as u8], &mut buf).map_err(|_| "i2c-read error")?;
 
@@ -93,15 +95,22 @@ where
     }  
 
     // convenience function to execute commands
-    fn update_reg_command<'a>(&mut self, command: register::Command) -> Result<(), &'a str> {
+    fn update_reg_command<'a>(&mut self, command: Command) -> Result<(), &'a str> {
         self.update_reg_bits(command.register(), command.bits(), command.mask())
+    }
+
+    fn read_reg_word<'a>(&mut self, reg: Register, buffer: &mut u8) -> Result<(), &'a str> {
+        let mut tbuf = [1; 1];
+        let result = self.i2c.write_read(self.address as u8, &[reg as u8], &mut tbuf).map_err(|_| "i2c-read error");
+        *buffer = tbuf[0];
+        result
     }
 
     /// Check whether the configured Sensor returns its correct id.
     pub fn who_am_i(&mut self) -> Result<(), ()> {
         let mut buf =[0; 1];
 
-        match self.i2c.write_read(self.address as u8, &[register::Register::WHO_AM_I as u8], &mut buf) {
+        match self.i2c.write_read(self.address as u8, &[Register::WHO_AM_I as u8], &mut buf) {
             Ok(()) => {
                 if buf[0] == 0x6C { Ok(()) }
                 else { Err(())}
@@ -115,12 +124,12 @@ where
     /// A software reset is performed and common settings are applied.
     pub fn setup(&mut self) -> Result<(), &str> {
 
-        self.update_reg_command(register::Command::SwReset)?;
+        self.update_reg_command(Command::SwReset)?;
         
         // Give it 10 tries. Timeout may be better here...
         let mut buf = [1; 1];
         for _ in 0..10 {
-            self.i2c.write_read(self.address as u8, &[register::Register::CTRL3_C as u8], &mut buf).map_err(|_| "i2c-read error")?; 
+            self.i2c.write_read(self.address as u8, &[Register::CTRL3_C as u8], &mut buf).map_err(|_| "i2c-read error")?; 
             if buf[0] == 0 { break;}
         }
 
@@ -128,17 +137,17 @@ where
             Err("Could not reset to default Config")
         } else {
             /* Disable I3C interface */
-            self.update_reg_bits(register::Register::CTRL9_XL, 0x02, 0x02)?;
-            self.update_reg_bits(register::Register::I3C_BUS_AVB, 0x00, 0b0001_1000)?;
+            self.update_reg_bits(Register::CTRL9_XL, 0x02, 0x02)?;
+            self.update_reg_bits(Register::I3C_BUS_AVB, 0x00, 0b0001_1000)?;
 
             /* Enable Block Data Update */
-            self.update_reg_bits(register::Register::CTRL3_C, 0b0100_0000, 0b0100_0000)?;
+            self.update_reg_bits(Register::CTRL3_C, 0b0100_0000, 0b0100_0000)?;
 
             /* Set Output Data Rate */
-            self.update_reg_command(register::Command::SetDataRate(register::DataRate::ODR_52Hz))?;
+            self.update_reg_command(Command::SetDataRate(DataRate::ODR_52Hz))?;
 
             /* Set full scale */
-            self.update_reg_command(register::Command::SetFullScale(register::FullScale::FS_XL_4g))?;
+            self.update_reg_command(Command::SetFullScale(FullScale::FS_XL_4g))?;
 
             /* Wait stable output */
             self.delay.delay_ms(100);
@@ -149,37 +158,31 @@ where
 
 
     /// Sets the measurement output rate.
-    pub fn set_output_data_rate<'a>(&mut self, datarate: register::DataRate) -> Result<(), &'a str> {
-        self.update_reg_command(register::Command::SetDataRate(datarate))
+    pub fn set_output_data_rate<'a>(&mut self, datarate: DataRate) -> Result<(), &'a str> {
+        self.update_reg_command(Command::SetDataRate(datarate))
     }
 
-    // Simple functions for testing
+    /// Simple function to read single acceleration measurement
     // The sensor and its configuration is pretty complex
     // the final implementation would look quite fancy
     pub fn read_acceleration(&mut self) -> Result<Acceleration, &str> {
-
-        Err("not implemented yet")
-        /* Check if new value available */
-        /*
         let mut data_rdy: u8 = 0;
-        unsafe {
-            lsm6dsox_xl_flag_data_ready_get(&mut self.hw.dev_ctx, &mut data_rdy);
-        }
-
+        self.read_reg_word(Register::STATUS_REG, &mut data_rdy)?;
         if data_rdy == 0 {
             Err("No Data Ready")
         } else {
-            /* Read dummy data and discard it */
-            let mut data_raw: [i16; 3] = [0, 0, 0];
-            unsafe {
-                lsm6dsox_acceleration_raw_get(&mut self.hw.dev_ctx, data_raw.as_mut_ptr());
+            let mut data_raw: [u8; 6] = [0; 6]; // All 3 axes x, y, z i16 values, decoded little endian, 2nd Complement 
+            self.i2c.write_read(self.address as u8 ,&[Register::OUTX_L_A as u8], &mut data_raw).map_err(|_| "i2c-read error")?;
+            let mut data: [f32; 3] = [0.0; 3];
+            for i in 0..3 {
+                data[i] = LittleEndian::read_i16(&data_raw[i*2..i*2+1]) as f32 * 0.122;
             }
 
             Ok(Acceleration {
-                x: unsafe { lsm6dsox_from_fs4_to_mg(data_raw[0]) } as f32,
-                y: unsafe { lsm6dsox_from_fs4_to_mg(data_raw[1]) } as f32,
-                z: unsafe { lsm6dsox_from_fs4_to_mg(data_raw[2]) } as f32,
+                x: data[0],
+                y: data[1],
+                z: data[2],
             })
-        } */
+        }
     }
 }

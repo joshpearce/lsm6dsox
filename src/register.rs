@@ -112,10 +112,13 @@ pub enum Register {
     FIFO_DATA_OUT_Z_H          = 0x7E
 }
 
+/// Possible output data rates
+/// Corresponding to register ```CTRL1_XL```
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
-pub enum DataRate {
+pub enum DataRate {  
+    /// Power down state
     ODR_PD      = 0b0000_0000,
     ODR_1Hz6    = 0b1011_0000,
     ODR_12Hz5   = 0b0001_0000,
@@ -131,11 +134,14 @@ pub enum DataRate {
 
 }
 
+/// Possible output ranges.
+/// Corresponding to register ```CTRL1_XL```
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub enum FullScale {
     FS_XL_2g    = 0b0000_0000,
+    /// When ```XL_FS_MODE``` in ```CTRL8_XL``` is set to 1, ```FS_XL_16g``` set scale to 2g. 
     FS_XL_16g   = 0b0000_0100,
     FS_XL_4g    = 0b0000_1000,
     FS_XL_8g    = 0b0000_1100,

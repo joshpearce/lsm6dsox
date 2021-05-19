@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 log = "0.4.13"
 embedded-hal = "0.2.4"
+byteorder = "1.4.3"
