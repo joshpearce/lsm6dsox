@@ -159,7 +159,7 @@ impl Command {
     pub fn register(&self) -> Register {
         match *self {
             Command::SwReset => Register::CTRL3_C,
-            Command::SetDataRate(_) => Register::CTRL9_XL,
+            Command::SetDataRate(_) => Register::CTRL1_XL,
             Command::SetFullScale(_) => Register::CTRL1_XL
         }
     }
