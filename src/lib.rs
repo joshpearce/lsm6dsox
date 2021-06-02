@@ -46,6 +46,8 @@ pub trait Sensor {
     fn setup(&mut self) -> Result<(), &str>;
     fn set_output_data_rate<'a>(&mut self, datarate: DataRate) -> Result<(), &'a str>;
     fn read_acceleration(&mut self) -> Result<Acceleration, &str>;
+    fn setup_double_tap(&mut self) -> Result<(), &str>;
+    fn check_double_tap(&mut self) -> Result<bool, &str>;
 }
 /// Representation of a LSM6DSOX. Stores the address and device peripherals.
 pub struct Lsm6dsox<PwrPin, I2C, Delay>
@@ -139,7 +141,7 @@ where
     // the final implementation would look quite fancy
     fn read_acceleration(&mut self) -> Result<Acceleration, &str> {
         let mut data_rdy: u8 = 0;
-        self.read_reg_word(Register::STATUS_REG, &mut data_rdy)?;
+        self.read_reg_byte(Register::STATUS_REG, &mut data_rdy)?;
         if data_rdy == 0 {
             Err("No Data Ready")
         } else {
@@ -156,6 +158,60 @@ where
                 z: data[2],
             })
         }
+    }
+
+    fn setup_double_tap(&mut self) -> Result<(), &str> {
+        self.update_reg_command(Command::SwReset)?;
+        
+        // Give it 10 tries. Timeout may be better here...
+        let mut buf = [1; 1];
+        for _ in 0..10 {
+            self.i2c.write_read(self.address as u8, &[Register::CTRL3_C as u8], &mut buf).map_err(|_| "i2c-read error")?; 
+            if buf[0]&1 == 0 { break;}
+        }
+
+        if buf[0]&1 != 0 {
+            Err("Could not reset to default Config")
+        } else {
+            /* Disable I3C interface */
+            self.update_reg_bits(Register::CTRL9_XL, 0x02, 0x02)?;
+            self.update_reg_bits(Register::I3C_BUS_AVB, 0x00, 0b0001_1000)?;
+            /* Set Output Data Rate */
+            self.update_reg_command(Command::SetDataRate(DataRate::ODR_416Hz))?;
+                                                                                        // Output data rate and full scale could be set with one register update, maybe change this
+            /* Set full scale */
+            self.update_reg_command(Command::SetFullScale(FullScale::FS_XL_2g))?;
+
+            /* Enable tap detection */
+            self.update_reg_command(Command::TapEnable(true,true,true))?;
+
+            /* Set tap threshold 0x08 = 500mg for configured FS_XL*/
+            self.update_reg_command(Command::TapThreshold(Axis::X, 0x08))?;
+            self.update_reg_command(Command::TapThreshold(Axis::Y, 0x08))?;
+            self.update_reg_command(Command::TapThreshold(Axis::Z, 0x08))?;
+
+            self.update_reg_command(Command::TapDuration(0x07))?;
+            self.update_reg_command(Command::TapQuiet(0x03))?;
+            self.update_reg_command(Command::TapShock(0x03))?;
+
+            self.update_reg_command(Command::TapMode(TapMode::SingleAndDouble))?;
+
+            /* Enable Interrupts */
+            self.update_reg_command(Command::InterruptEnable(true))?; // This must always be enabled
+            self.update_reg_command(Command::MapInterrupt(InterruptLine::INT2, InterruptSource::DoubleTap, true))
+        }
+    }
+
+    fn check_double_tap(&mut self) -> Result<bool, &str> {
+        let mut buf = 0;
+        self.read_reg_byte(Register::TAP_SRC, &mut buf)?;
+
+        if buf & 0x10 == 0x10 {
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+
     }
 }
 
@@ -193,7 +249,7 @@ where
         self.update_reg_bits(command.register(), command.bits(), command.mask())
     }
 
-    fn read_reg_word<'a>(&mut self, reg: Register, buffer: &mut u8) -> Result<(), &'a str> {
+    fn read_reg_byte<'a>(&mut self, reg: Register, buffer: &mut u8) -> Result<(), &'a str> {
         let mut tbuf = [1; 1];
         let result = self.i2c.write_read(self.address as u8, &[reg as u8], &mut tbuf).map_err(|_| "i2c-read error");
         *buffer = tbuf[0];

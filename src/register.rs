@@ -147,12 +147,46 @@ pub enum FullScale {
     FS_XL_8g    = 0b0000_1100,
 }
 
+/// Generic axis enum to map various commands.
+pub enum Axis {
+    X,
+    Y,
+    Z
+}
+
+pub enum TapMode {
+    Single,
+    SingleAndDouble,
+}
+
+/// Representation of interrupt pins 1 and 2.
+pub enum InterruptLine {
+    INT1,
+    INT2,
+}
+
+/// Interrupt sources which can be routed to interrupt pins.
+/// Note: This is incomplete right now.
+pub enum InterruptSource {
+    SingleTap,
+    DoubleTap,
+}
+
 // Maybe this command structure is not a good way, since the register structure leads to complex commands
 // TODO find a better way to simplify Commands, e.g. define bitmasks for the register bits
 pub enum Command {
     SwReset,
     SetDataRate(DataRate),
-    SetFullScale(FullScale)
+    SetFullScale(FullScale),
+    TapEnable(bool, bool, bool),
+    TapThreshold(Axis, u8),
+    TapDuration(u8),
+    TapQuiet(u8),
+    TapShock(u8),
+    TapMode(TapMode),
+    InterruptEnable(bool),
+    MapInterrupt(InterruptLine, InterruptSource, bool),
+
 }
 
 impl Command {
@@ -160,14 +194,37 @@ impl Command {
         match *self {
             Command::SwReset => Register::CTRL3_C,
             Command::SetDataRate(_) => Register::CTRL1_XL,
-            Command::SetFullScale(_) => Register::CTRL1_XL
+            Command::SetFullScale(_) => Register::CTRL1_XL,
+            Command::TapEnable(_, _, _) => Register::TAP_CFG0,
+            Command::TapThreshold(Axis::X, _) => Register::TAP_CFG1,
+            Command::TapThreshold(Axis::Y, _) => Register::TAP_CFG2,
+            Command::TapThreshold(Axis::Z, _) => Register::TAP_THS_6D,
+            Command::TapDuration(_) => Register::INT_DUR2,
+            Command::TapQuiet(_) => Register::INT_DUR2,
+            Command::TapShock(_) => Register::INT_DUR2,
+            Command::TapMode(_) => Register::WAKE_UP_THS,
+            Command::InterruptEnable(_) => Register::TAP_CFG2,
+            Command::MapInterrupt(InterruptLine::INT1, _, _) => Register::MD1_CFG,
+            Command::MapInterrupt(InterruptLine::INT2, _, _) => Register::MD2_CFG,
         }
     }
     pub fn bits(&self) -> u8 {
         match *self {
             Command::SwReset => 0x01,
             Command::SetDataRate(dr) => dr as u8,
-            Command::SetFullScale(fs) => fs as u8, 
+            Command::SetFullScale(fs) => fs as u8,
+            Command::TapEnable(x, y, z) => {
+                (x as u8) << 3 | (y as u8) << 2 | (z as u8) << 1
+            },
+            Command::TapThreshold(_, value) => value,
+            Command::TapDuration(value) => value<<4, 
+            Command::TapQuiet(value) => value<<2, 
+            Command::TapShock(value) => value,
+            Command::TapMode(TapMode::Single) => 0<<7, 
+            Command::TapMode(TapMode::SingleAndDouble) => 1<<7,
+            Command::InterruptEnable(en) => (en as u8)<<7,
+            Command::MapInterrupt(_, InterruptSource::SingleTap, en) => (en as u8) << 6, 
+            Command::MapInterrupt(_, InterruptSource::DoubleTap, en) => (en as u8) << 3, 
         }
     }
     pub fn mask(&self) -> u8 {
@@ -175,6 +232,15 @@ impl Command {
             Command::SwReset => 0x01,
             Command::SetDataRate(_) => 0xF0,
             Command::SetFullScale(_) => 0b0000_1100,
+            Command::TapEnable(_,_,_) => 0b0000_1110,
+            Command::TapThreshold(_, _) => 0b0001_1111,
+            Command::TapDuration(_) => 0xF0,
+            Command::TapQuiet(_) => 0x0C,
+            Command::TapShock(_) => 0x03,
+            Command::TapMode(_) => 0x80,
+            Command::InterruptEnable(_) => 0x80,
+            Command::MapInterrupt(_, InterruptSource::SingleTap, _) => 0b0100_0000, 
+            Command::MapInterrupt(_, InterruptSource::DoubleTap, _) => 0b0000_1000, 
         }
     }
 }
