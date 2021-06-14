@@ -7,4 +7,6 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-stmems-driver-sys = { git = "ssh://git@gitlab.cc-asp.fraunhofer.de/awesome-halo-130/sw-universe/stmems-driver-sys.git", tag = "v0.1.0" }
+log = "0.4.13"
+embedded-hal = "0.2.4"
+byteorder = { version = "1.4.3", default-features = false }
