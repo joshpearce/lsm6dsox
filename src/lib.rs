@@ -11,6 +11,13 @@ use register::*;
 use byteorder::{ByteOrder, LittleEndian};
 use embedded_hal::blocking::{delay::DelayMs, i2c};
 
+#[derive(Clone, Copy, Debug)]
+pub enum Error {
+    I2cWriteError,
+    I2cReadError,
+    ResetFailed,
+    NoDataReady,
+}
 /// Acceleration measurement result.
 #[derive(Debug)]
 pub struct Acceleration {
@@ -43,11 +50,11 @@ pub enum PowerActive<PwrPin: embedded_hal::digital::v2::OutputPin> {
 pub trait Sensor {
     fn power(&mut self, on: bool) -> Result<(), ()>;
     fn who_am_i(&mut self) -> Result<(), ()>;
-    fn setup(&mut self) -> Result<(), &str>;
-    fn set_output_data_rate<'a>(&mut self, datarate: DataRate) -> Result<(), &'a str>;
-    fn read_acceleration(&mut self) -> Result<Acceleration, &str>;
-    fn setup_double_tap(&mut self) -> Result<(), &str>;
-    fn check_double_tap(&mut self) -> Result<bool, &str>;
+    fn setup(&mut self) -> Result<(), Error>;
+    fn set_output_data_rate(&mut self, datarate: DataRate) -> Result<(), Error>;
+    fn read_acceleration(&mut self) -> Result<Acceleration, Error>;
+    fn setup_double_tap(&mut self) -> Result<(), Error>;
+    fn check_double_tap(&mut self) -> Result<bool, Error>;
 }
 /// Representation of a LSM6DSOX. Stores the address and device peripherals.
 pub struct Lsm6dsox<PwrPin, I2C, Delay>
@@ -102,7 +109,7 @@ where
     // TODO Add fancy config structure
     /// Initializes the sensor.
     /// A software reset is performed and common settings are applied.
-    fn setup(&mut self) -> Result<(), &str> {
+    fn setup(&mut self) -> Result<(), Error> {
         self.update_reg_command(Command::SwReset)?;
 
         // Give it 10 tries. Timeout may be better here...
@@ -110,14 +117,14 @@ where
         for _ in 0..10 {
             self.i2c
                 .write_read(self.address as u8, &[Register::CTRL3_C as u8], &mut buf)
-                .map_err(|_| "i2c-read error")?;
+                .map_err(|_| Error::I2cReadError)?;
             if buf[0] & 1 == 0 {
                 break;
             }
         }
 
         if buf[0] & 1 != 0 {
-            Err("Could not reset to default Config")
+            Err(Error::ResetFailed)
         } else {
             /* Disable I3C interface */
             self.update_reg_bits(Register::CTRL9_XL, 0x02, 0x02)?;
@@ -140,18 +147,18 @@ where
     }
 
     /// Sets the measurement output rate.
-    fn set_output_data_rate<'a>(&mut self, datarate: DataRate) -> Result<(), &'a str> {
+    fn set_output_data_rate(&mut self, datarate: DataRate) -> Result<(), Error> {
         self.update_reg_command(Command::SetDataRate(datarate))
     }
 
     /// Simple function to read single acceleration measurement.
     // The sensor and its configuration is pretty complex
     // the final implementation would look quite fancy
-    fn read_acceleration(&mut self) -> Result<Acceleration, &str> {
+    fn read_acceleration(&mut self) -> Result<Acceleration, Error> {
         let mut data_rdy: u8 = 0;
         self.read_reg_byte(Register::STATUS_REG, &mut data_rdy)?;
         if data_rdy == 0 {
-            Err("No Data Ready")
+            Err(Error::NoDataReady)
         } else {
             let mut data_raw: [u8; 6] = [0; 6]; // All 3 axes x, y, z i16 values, decoded little endian, 2nd Complement
             self.i2c
@@ -160,7 +167,7 @@ where
                     &[Register::OUTX_L_A as u8],
                     &mut data_raw,
                 )
-                .map_err(|_| "i2c-read error")?;
+                .map_err(|_| Error::I2cReadError)?;
             let mut data: [f32; 3] = [0.0; 3];
             for i in 0..3 {
                 data[i] = LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]) as f32 * 0.122;
@@ -177,7 +184,7 @@ where
     /// Sets up double-tap recognition and enables Interrupts on INT2 pin.
     ///
     /// Does a full reset of the lsm6dsox and configures everything necessary, similar to [setup()](Lsm6dsox::setup()).
-    fn setup_double_tap(&mut self) -> Result<(), &str> {
+    fn setup_double_tap(&mut self) -> Result<(), Error> {
         self.update_reg_command(Command::SwReset)?;
 
         // Give it 10 tries. Timeout may be better here...
@@ -185,14 +192,14 @@ where
         for _ in 0..10 {
             self.i2c
                 .write_read(self.address as u8, &[Register::CTRL3_C as u8], &mut buf)
-                .map_err(|_| "i2c-read error")?;
+                .map_err(|_| Error::I2cReadError)?;
             if buf[0] & 1 == 0 {
                 break;
             }
         }
 
         if buf[0] & 1 != 0 {
-            Err("Could not reset to default Config")
+            Err(Error::ResetFailed)
         } else {
             /* Disable I3C interface */
             self.update_reg_bits(Register::CTRL9_XL, 0x02, 0x02)?;
@@ -229,7 +236,7 @@ where
 
     /// Checks if a double-tap occured.
     /// The Register will be cleared after a check has been made.
-    fn check_double_tap(&mut self) -> Result<bool, &str> {
+    fn check_double_tap(&mut self) -> Result<bool, Error> {
         let mut buf = 0;
         self.read_reg_byte(Register::TAP_SRC, &mut buf)?;
 
@@ -262,12 +269,12 @@ where
         (self.power, self.i2c, self.delay)
     }
 
-    fn update_reg_bits<'a>(&mut self, reg: Register, data: u8, bitmask: u8) -> Result<(), &'a str> {
+    fn update_reg_bits(&mut self, reg: Register, data: u8, bitmask: u8) -> Result<(), Error> {
         // lifetime has to be annotated so that self wont be borrowed as long as Err(&str) exists
         let mut buf = [0; 1];
         self.i2c
             .write_read(self.address as u8, &[reg as u8], &mut buf)
-            .map_err(|_| "i2c-read error")?;
+            .map_err(|_| Error::I2cReadError)?;
 
         buf[0] = buf[0] & !bitmask;
         buf[0] = buf[0] | (data & bitmask);
@@ -275,20 +282,20 @@ where
         let update = [reg as u8, buf[0]];
         self.i2c
             .write(self.address as u8, &update)
-            .map_err(|_| "i2c-write error")
+            .map_err(|_| Error::I2cWriteError)
     }
 
     // convenience function to execute commands
-    fn update_reg_command<'a>(&mut self, command: Command) -> Result<(), &'a str> {
+    fn update_reg_command(&mut self, command: Command) -> Result<(), Error> {
         self.update_reg_bits(command.register(), command.bits(), command.mask())
     }
 
-    fn read_reg_byte<'a>(&mut self, reg: Register, buffer: &mut u8) -> Result<(), &'a str> {
+    fn read_reg_byte(&mut self, reg: Register, buffer: &mut u8) -> Result<(), Error> {
         let mut tbuf = [1; 1];
         let result = self
             .i2c
             .write_read(self.address as u8, &[reg as u8], &mut tbuf)
-            .map_err(|_| "i2c-read error");
+            .map_err(|_| Error::I2cReadError);
         *buffer = tbuf[0];
         result
     }
