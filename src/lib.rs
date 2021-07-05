@@ -112,9 +112,11 @@ where
     fn setup(&mut self) -> Result<(), Error> {
         self.update_reg_command(Command::SwReset)?;
 
-        // Give it 10 tries. Timeout may be better here...
+        // Give it 5 tries
+        // A delay is necessary here, otherwise reset may never finish because the lsm is to busy.
         let mut buf = [1; 1];
-        for _ in 0..10 {
+        for _ in 0..5 {
+            self.delay.delay_ms(10);
             self.i2c
                 .write_read(self.address as u8, &[Register::CTRL3_C as u8], &mut buf)
                 .map_err(|_| Error::I2cReadError)?;
@@ -187,51 +189,36 @@ where
     fn setup_double_tap(&mut self) -> Result<(), Error> {
         self.update_reg_command(Command::SwReset)?;
 
-        // Give it 10 tries. Timeout may be better here...
-        let mut buf = [1; 1];
-        for _ in 0..10 {
-            self.i2c
-                .write_read(self.address as u8, &[Register::CTRL3_C as u8], &mut buf)
-                .map_err(|_| Error::I2cReadError)?;
-            if buf[0] & 1 == 0 {
-                break;
-            }
-        }
+        /* Disable I3C interface */
+        self.update_reg_bits(Register::CTRL9_XL, 0x02, 0x02)?;
+        self.update_reg_bits(Register::I3C_BUS_AVB, 0x00, 0b0001_1000)?;
+        /* Set Output Data Rate */
+        self.update_reg_command(Command::SetDataRate(DataRate::ODR_416Hz))?;
+        // Output data rate and full scale could be set with one register update, maybe change this
+        /* Set full scale */
+        self.update_reg_command(Command::SetFullScale(FullScale::FS_XL_2g))?;
 
-        if buf[0] & 1 != 0 {
-            Err(Error::ResetFailed)
-        } else {
-            /* Disable I3C interface */
-            self.update_reg_bits(Register::CTRL9_XL, 0x02, 0x02)?;
-            self.update_reg_bits(Register::I3C_BUS_AVB, 0x00, 0b0001_1000)?;
-            /* Set Output Data Rate */
-            self.update_reg_command(Command::SetDataRate(DataRate::ODR_416Hz))?;
-            // Output data rate and full scale could be set with one register update, maybe change this
-            /* Set full scale */
-            self.update_reg_command(Command::SetFullScale(FullScale::FS_XL_2g))?;
+        /* Enable tap detection */
+        self.update_reg_command(Command::TapEnable(true, true, true))?;
 
-            /* Enable tap detection */
-            self.update_reg_command(Command::TapEnable(true, true, true))?;
+        /* Set tap threshold 0x08 = 500mg for configured FS_XL*/
+        self.update_reg_command(Command::TapThreshold(Axis::X, 0x08))?;
+        self.update_reg_command(Command::TapThreshold(Axis::Y, 0x08))?;
+        self.update_reg_command(Command::TapThreshold(Axis::Z, 0x08))?;
 
-            /* Set tap threshold 0x08 = 500mg for configured FS_XL*/
-            self.update_reg_command(Command::TapThreshold(Axis::X, 0x08))?;
-            self.update_reg_command(Command::TapThreshold(Axis::Y, 0x08))?;
-            self.update_reg_command(Command::TapThreshold(Axis::Z, 0x08))?;
+        self.update_reg_command(Command::TapDuration(0x07))?;
+        self.update_reg_command(Command::TapQuiet(0x03))?;
+        self.update_reg_command(Command::TapShock(0x03))?;
 
-            self.update_reg_command(Command::TapDuration(0x07))?;
-            self.update_reg_command(Command::TapQuiet(0x03))?;
-            self.update_reg_command(Command::TapShock(0x03))?;
+        self.update_reg_command(Command::TapMode(TapMode::SingleAndDouble))?;
 
-            self.update_reg_command(Command::TapMode(TapMode::SingleAndDouble))?;
-
-            /* Enable Interrupts */
-            self.update_reg_command(Command::InterruptEnable(true))?; // This must always be enabled
-            self.update_reg_command(Command::MapInterrupt(
-                InterruptLine::INT2,
-                InterruptSource::DoubleTap,
-                true,
-            ))
-        }
+        /* Enable Interrupts */
+        self.update_reg_command(Command::InterruptEnable(true))?; // This must always be enabled
+        self.update_reg_command(Command::MapInterrupt(
+            InterruptLine::INT2,
+            InterruptSource::DoubleTap,
+            true,
+        ))
     }
 
     /// Checks if a double-tap occured.
