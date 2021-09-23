@@ -7,6 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-log = "0.4.13"
-embedded-hal = "0.2.4"
-byteorder = { version = "1.4.3", default-features = false }
+log = "^0.4.13"
+embedded-hal = "^0.2.4"
+byteorder = { version = "^1.4.3", default-features = false }
+accelerometer = "^0.12.0"
