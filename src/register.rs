@@ -133,17 +133,33 @@ pub enum DataRate {
     ODR_6kHz66 = 0b1010_0000,
 }
 
-/// Possible output ranges.
+/// Possible accelerometer output ranges.
 /// Corresponding to register ```CTRL1_XL```
+///
+/// Note: Accelerometer values are provided in 16 bit 2nd complement values by the lsm6dsox,
+/// which represent the configured scale range.
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
-pub enum FullScale {
+pub enum AccelScale {
     FS_XL_2g = 0b0000_0000,
     /// When ```XL_FS_MODE``` in ```CTRL8_XL``` is set to 1, ```FS_XL_16g``` set scale to 2g.
     FS_XL_16g = 0b0000_0100,
     FS_XL_4g = 0b0000_1000,
     FS_XL_8g = 0b0000_1100,
+}
+
+/// Possible gyroscope output ranges.
+/// Corresponding to register ```CTRL2_G```
+#[allow(non_camel_case_types)]
+#[allow(dead_code)]
+#[derive(Clone, Copy)]
+pub enum GyroScale {
+    FS_G_125dps = 0b0000_0010,
+    FS_G_250dps = 0b0000_0000,
+    FS_G_500dps = 0b0000_0100,
+    FS_G_1000dps = 0b0000_1000,
+    FS_G_2000dps = 0b0000_1100,
 }
 
 /// Generic axis enum to map various commands.
@@ -153,9 +169,26 @@ pub enum Axis {
     Z,
 }
 
+/// Configures the sensor to detect either only single-taps or both single- and double-taps.
+///
+/// Note: Mapping of the tap detection to **interrupt lines** is **independent** from this.
+/// While double-taps can't be detected *without* detecting single-taps, they **can** be routed to interrupt lines seperately (and also checked seperately).
 pub enum TapMode {
     Single,
     SingleAndDouble,
+}
+
+/// Tap configuration
+///
+/// Configure tap recognition for x, y, z axis and set latched interrupts
+#[derive(Clone, Copy)]
+pub struct TapCfg {
+    /// Enable tap detection on seperate axes.
+    pub en_x_y_z: (bool, bool, bool),
+    /// Latched interrupts
+    ///
+    /// When set, the interrupt source has to be checked to clear the interrupt.
+    pub lir: bool,
 }
 
 /// Representation of interrupt pins 1 and 2.
@@ -171,13 +204,22 @@ pub enum InterruptSource {
     DoubleTap,
 }
 
-// Maybe this command structure is not a good way, since the register structure leads to complex commands
-// TODO find a better way to simplify Commands, e.g. define bitmasks for the register bits
+/// Commands Enum to specify Command structures
+/// which set various register bits of the lsm.
+///
+/// A command can either be a command without parameters or with one or multiple parameters.
+///
+/// One command will write bits to its assigned register by specifying the register,
+/// the mask and the bits with the impl over the enum.
+/// Since some settings span over multiple registers,
+/// the register function returns register adresses dependent on the command parameters.
 pub enum Command {
     SwReset,
-    SetDataRate(DataRate),
-    SetFullScale(FullScale),
-    TapEnable(bool, bool, bool),
+    SetDataRateXl(DataRate),
+    SetAccelScale(AccelScale),
+    SetDataRateG(DataRate),
+    SetGyroScale(GyroScale),
+    TapEnable(TapCfg),
     TapThreshold(Axis, u8),
     TapDuration(u8),
     TapQuiet(u8),
@@ -188,12 +230,13 @@ pub enum Command {
 }
 
 impl Command {
+    /// Returns the register address to write to for the specific command.
     pub fn register(&self) -> Register {
         match *self {
             Command::SwReset => Register::CTRL3_C,
-            Command::SetDataRate(_) => Register::CTRL1_XL,
-            Command::SetFullScale(_) => Register::CTRL1_XL,
-            Command::TapEnable(_, _, _) => Register::TAP_CFG0,
+            Command::SetDataRateXl(_) => Register::CTRL1_XL,
+            Command::SetAccelScale(_) => Register::CTRL1_XL,
+            Command::TapEnable(_) => Register::TAP_CFG0,
             Command::TapThreshold(Axis::X, _) => Register::TAP_CFG1,
             Command::TapThreshold(Axis::Y, _) => Register::TAP_CFG2,
             Command::TapThreshold(Axis::Z, _) => Register::TAP_THS_6D,
@@ -204,14 +247,24 @@ impl Command {
             Command::InterruptEnable(_) => Register::TAP_CFG2,
             Command::MapInterrupt(InterruptLine::INT1, _, _) => Register::MD1_CFG,
             Command::MapInterrupt(InterruptLine::INT2, _, _) => Register::MD2_CFG,
+            Command::SetDataRateG(_) => Register::CTRL2_G,
+            Command::SetGyroScale(_) => Register::CTRL2_G,
         }
     }
+    /// Returns a byte containing data to be written by the command.
+    ///
+    /// For bools this is mostly done by converting and shifting to the corresponding position.
     pub fn bits(&self) -> u8 {
         match *self {
             Command::SwReset => 0x01,
-            Command::SetDataRate(dr) => dr as u8,
-            Command::SetFullScale(fs) => fs as u8,
-            Command::TapEnable(x, y, z) => (x as u8) << 3 | (y as u8) << 2 | (z as u8) << 1,
+            Command::SetDataRateXl(dr) => dr as u8,
+            Command::SetAccelScale(fs) => fs as u8,
+            Command::TapEnable(cfg) => {
+                (cfg.en_x_y_z.0 as u8) << 3
+                    | (cfg.en_x_y_z.1 as u8) << 2
+                    | (cfg.en_x_y_z.2 as u8) << 1
+                    | (cfg.lir as u8)
+            }
             Command::TapThreshold(_, value) => value,
             Command::TapDuration(value) => value << 4,
             Command::TapQuiet(value) => value << 2,
@@ -221,14 +274,17 @@ impl Command {
             Command::InterruptEnable(en) => (en as u8) << 7,
             Command::MapInterrupt(_, InterruptSource::SingleTap, en) => (en as u8) << 6,
             Command::MapInterrupt(_, InterruptSource::DoubleTap, en) => (en as u8) << 3,
+            Command::SetDataRateG(dr) => dr as u8,
+            Command::SetGyroScale(fs) => fs as u8,
         }
     }
+    /// Returns the bitmask for the specified Command.
     pub fn mask(&self) -> u8 {
         match *self {
             Command::SwReset => 0x01,
-            Command::SetDataRate(_) => 0xF0,
-            Command::SetFullScale(_) => 0b0000_1100,
-            Command::TapEnable(_, _, _) => 0b0000_1110,
+            Command::SetDataRateXl(_) => 0xF0,
+            Command::SetAccelScale(_) => 0b0000_1100,
+            Command::TapEnable(_) => 0b0000_1111,
             Command::TapThreshold(_, _) => 0b0001_1111,
             Command::TapDuration(_) => 0xF0,
             Command::TapQuiet(_) => 0x0C,
@@ -237,6 +293,8 @@ impl Command {
             Command::InterruptEnable(_) => 0x80,
             Command::MapInterrupt(_, InterruptSource::SingleTap, _) => 0b0100_0000,
             Command::MapInterrupt(_, InterruptSource::DoubleTap, _) => 0b0000_1000,
+            Command::SetDataRateG(_) => 0xF0,
+            Command::SetGyroScale(_) => 0b0000_1110,
         }
     }
 }
