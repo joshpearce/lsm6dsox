@@ -35,29 +35,10 @@ where
                 )
                 .map_err(|_| Error::I2cReadError)?;
             let mut data: [f32; 3] = [0.0; 3];
+            let factor = self.config.xl_scale.to_factor();
             // Now convert the raw i16 values to f32 engineering units
             for i in 0..3 {
-                match self.config.xl_scale {
-                    AccelScale::FS_XL_2g => {
-                        data[i] =
-                            LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]) as f32 * 0.000061
-                        // If the i16 represents a range of -2G to +2G range multiply by the given factor.
-                        // Corresponds to 2 / 0x7FFF (rounded).
-                        // Same goes for the other ranges.
-                    }
-                    AccelScale::FS_XL_16g => {
-                        data[i] =
-                            LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]) as f32 * 0.0006714
-                    }
-                    AccelScale::FS_XL_4g => {
-                        data[i] =
-                            LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]) as f32 * 0.000122
-                    }
-                    AccelScale::FS_XL_8g => {
-                        data[i] =
-                            LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]) as f32 * 0.000244
-                    }
-                }
+                data[i] = LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]) as f32 * factor
             }
 
             Ok(F32x3::new(data[0], data[1], data[2]))
@@ -76,58 +57,98 @@ where
 
         // This match compares the raw sample rate readout with the DataRate enum.
         // Rust lacks the ability to match an enum with a int directly,
-        // so it has to be done with this construct (more or less a more readible nested if).
+        // so it has to be done with this construct (more or less a more readable nested if).
         match buf[0] & 0xF0 {
-            x if x == DataRate::ODR_PD as u8 => {
-                self.config.xl_odr = DataRate::ODR_PD;
+            x if x == DataRate::PowerDown as u8 => {
+                self.config.xl_odr = DataRate::PowerDown;
                 Ok(0.0)
             }
-            x if x == DataRate::ODR_1Hz6 as u8 => {
-                self.config.xl_odr = DataRate::ODR_1Hz6;
+            x if x == DataRate::Freq1Hz6 as u8 => {
+                self.config.xl_odr = DataRate::Freq1Hz6;
                 Ok(1.6)
             }
-            x if x == DataRate::ODR_12Hz5 as u8 => {
-                self.config.xl_odr = DataRate::ODR_12Hz5;
+            x if x == DataRate::Freq12Hz5 as u8 => {
+                self.config.xl_odr = DataRate::Freq12Hz5;
                 Ok(12.5)
             }
-            x if x == DataRate::ODR_26Hz as u8 => {
-                self.config.xl_odr = DataRate::ODR_26Hz;
+            x if x == DataRate::Freq26Hz as u8 => {
+                self.config.xl_odr = DataRate::Freq26Hz;
                 Ok(26.0)
             }
-            x if x == DataRate::ODR_52Hz as u8 => {
-                self.config.xl_odr = DataRate::ODR_52Hz;
+            x if x == DataRate::Freq52Hz as u8 => {
+                self.config.xl_odr = DataRate::Freq52Hz;
                 Ok(52.0)
             }
-            x if x == DataRate::ODR_104Hz as u8 => {
-                self.config.xl_odr = DataRate::ODR_104Hz;
+            x if x == DataRate::Freq104Hz as u8 => {
+                self.config.xl_odr = DataRate::Freq104Hz;
                 Ok(104.0)
             }
-            x if x == DataRate::ODR_208Hz as u8 => {
-                self.config.xl_odr = DataRate::ODR_208Hz;
+            x if x == DataRate::Freq208Hz as u8 => {
+                self.config.xl_odr = DataRate::Freq208Hz;
                 Ok(208.0)
             }
-            x if x == DataRate::ODR_416Hz as u8 => {
-                self.config.xl_odr = DataRate::ODR_416Hz;
+            x if x == DataRate::Freq416Hz as u8 => {
+                self.config.xl_odr = DataRate::Freq416Hz;
                 Ok(416.0)
             }
-            x if x == DataRate::ODR_833Hz as u8 => {
-                self.config.xl_odr = DataRate::ODR_833Hz;
+            x if x == DataRate::Freq833Hz as u8 => {
+                self.config.xl_odr = DataRate::Freq833Hz;
                 Ok(833.0)
             }
-            x if x == DataRate::ODR_1kHz66 as u8 => {
-                self.config.xl_odr = DataRate::ODR_1kHz66;
+            x if x == DataRate::Freq1660Hz as u8 => {
+                self.config.xl_odr = DataRate::Freq1660Hz;
                 Ok(1660.0)
             }
-            x if x == DataRate::ODR_3kHz33 as u8 => {
-                self.config.xl_odr = DataRate::ODR_3kHz33;
+            x if x == DataRate::Freq3330Hz as u8 => {
+                self.config.xl_odr = DataRate::Freq3330Hz;
                 Ok(3330.0)
             }
-            x if x == DataRate::ODR_6kHz66 as u8 => {
-                self.config.xl_odr = DataRate::ODR_6kHz66;
+            x if x == DataRate::Freq6660Hz as u8 => {
+                self.config.xl_odr = DataRate::Freq6660Hz;
                 Ok(6660.0)
             }
             // in all other cases the sensor reported an unspecified/invalid data rate.
             _ => Err(accelerometer::Error::new(accelerometer::ErrorKind::Device)),
+        }
+    }
+}
+
+impl<I2C, Delay> RawAccelerometer<I16x3> for Lsm6dsox<I2C, Delay>
+where
+    I2C: i2c::Write + i2c::WriteRead,
+    Delay: DelayMs<u32>,
+{
+    type Error = Error;
+
+    fn accel_raw(
+        &mut self,
+    ) -> Result<accelerometer::vector::I16x3, accelerometer::Error<Self::Error>> {
+        // First read the status register to determine if data is available,
+        // if so, read the six bytes of data and convert it.
+        let mut data_rdy: u8 = 0;
+        self.read_reg_byte(Register::STATUS_REG, &mut data_rdy)?;
+        if (data_rdy & 0b0000_0001) == 0 {
+            // check if XLDA bit is set in STATUS_REG
+            Err(accelerometer::Error::new_with_cause(
+                accelerometer::ErrorKind::Mode,
+                Error::NoDataReady,
+            ))
+        } else {
+            let mut data_raw: [u8; 6] = [0; 6]; // All 3 axes x, y, z i16 values, decoded little endian, 2nd Complement
+            self.i2c
+                .write_read(
+                    self.address as u8,
+                    &[Register::OUTX_L_A as u8],
+                    &mut data_raw,
+                )
+                .map_err(|_| Error::I2cReadError)?;
+            let mut data: [i16; 3] = [0; 3];
+            // Now convert the raw i16 values to f32 engineering units
+            for i in 0..3 {
+                data[i] = LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2])
+            }
+
+            Ok(I16x3::new(data[0], data[1], data[2]))
         }
     }
 }
@@ -143,19 +164,24 @@ where
         Ok(())
     }
 
-    fn set_accel_scale(&mut self, scale: AccelScale) -> Result<(), Error> {
+    fn set_accel_scale(&mut self, scale: AccelerometerScale) -> Result<(), Error> {
         self.update_reg_command(Command::SetAccelScale(scale))?;
         self.config.xl_scale = scale;
         Ok(())
     }
 
-    fn setup_tap_detection(&mut self, tap_cfg: TapCfg, tap_mode: TapMode) -> Result<(), Error> {
+    fn setup_tap_detection(
+        &mut self,
+        tap_cfg: TapCfg,
+        tap_mode: TapMode,
+        int_line: Option<InterruptLine>,
+    ) -> Result<(), Error> {
         /* Set Output Data Rate */
-        self.update_reg_command(Command::SetDataRateXl(DataRate::ODR_104Hz))?;
+        self.update_reg_command(Command::SetDataRateXl(DataRate::Freq104Hz))?;
         // Output data rate and full scale could be set with one register update, maybe change this
         /* Set full scale */
-        self.update_reg_command(Command::SetAccelScale(AccelScale::FS_XL_2g))?;
-        self.config.xl_scale = AccelScale::FS_XL_2g;
+        self.update_reg_command(Command::SetAccelScale(AccelerometerScale::Accel2g))?;
+        self.config.xl_scale = AccelerometerScale::Accel2g;
 
         /*
         Set XL_ULP_EN = 1 and XL_HM_MODE = 0 = high-performance mode
@@ -179,23 +205,27 @@ where
         self.update_reg_command(Command::TapMode(tap_mode))?;
 
         /* Enable Interrupts */
-        self.update_reg_command(Command::InterruptEnable(true))?; // This must always be enabled
-        self.update_reg_command(Command::MapInterrupt(
-            InterruptLine::INT2,
-            InterruptSource::DoubleTap,
-            true,
-        ))
+        if let Some(int_line) = int_line {
+            self.update_reg_command(Command::InterruptEnable(true))?; // This must always be enabled
+            match (tap_mode, int_line) {
+                (TapMode::Single, line) => self.update_reg_command(Command::MapInterrupt(
+                    line,
+                    InterruptSource::SingleTap,
+                    true,
+                ))?,
+                (TapMode::SingleAndDouble, line) => self.update_reg_command(
+                    Command::MapInterrupt(line, InterruptSource::DoubleTap, true),
+                )?,
+            }
+        }
+        Ok(())
     }
 
-    fn check_tap(&mut self) -> Result<bool, Error> {
+    fn check_tap(&mut self) -> Result<BitFlags<TapSource>, Error> {
         let mut buf = 0;
         self.read_reg_byte(Register::TAP_SRC, &mut buf)?;
 
-        if buf & 0x10 == 0x10 {
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        BitFlags::from_bits(buf).map_err(|_| Error::InvalidData)
     }
 
     fn set_tap_threshold(&mut self, x: u8, y: u8, z: u8) -> Result<(), Error> {

@@ -3,14 +3,16 @@
 // Licensed under the Open Logistics License 1.0.
 // For details on the licensing terms, see the LICENSE file.
 
+use crate::types::*;
+
 /// Registers which are accessible from the primary SPI/I2C/MIPI I3C interfaces.
 ///
 /// **Note:** These Register names correspond to the normal function registers.
-/// When embedded function access is enabled in `FUNC_CFG_ACCESS` these adresses correspond to different registers.
+/// When embedded function access is enabled in `FUNC_CFG_ACCESS` these addresses correspond to different registers.
 #[allow(non_camel_case_types)]
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
-pub enum Register {
+pub(crate) enum Register {
     I2C_ADD_L = 0xD5,
     I2C_ADD_H = 0xD7,
     ID = 0x6C,
@@ -112,98 +114,6 @@ pub enum Register {
     FIFO_DATA_OUT_Z_H = 0x7E,
 }
 
-/// Possible output data rates
-/// Corresponding to register ```CTRL1_XL```
-#[allow(non_camel_case_types)]
-#[allow(dead_code)]
-#[derive(Clone, Copy)]
-pub enum DataRate {
-    /// Power down state
-    ODR_PD = 0b0000_0000,
-    ODR_1Hz6 = 0b1011_0000,
-    ODR_12Hz5 = 0b0001_0000,
-    ODR_26Hz = 0b0010_0000,
-    ODR_52Hz = 0b0011_0000,
-    ODR_104Hz = 0b0100_0000,
-    ODR_208Hz = 0b0101_0000,
-    ODR_416Hz = 0b0110_0000,
-    ODR_833Hz = 0b0111_0000,
-    ODR_1kHz66 = 0b1000_0000,
-    ODR_3kHz33 = 0b1001_0000,
-    ODR_6kHz66 = 0b1010_0000,
-}
-
-/// Possible accelerometer output ranges.
-/// Corresponding to register ```CTRL1_XL```
-///
-/// Note: Accelerometer values are provided in 16 bit 2nd complement values by the lsm6dsox,
-/// which represent the configured scale range.
-#[allow(non_camel_case_types)]
-#[allow(dead_code)]
-#[derive(Clone, Copy)]
-pub enum AccelScale {
-    FS_XL_2g = 0b0000_0000,
-    /// When ```XL_FS_MODE``` in ```CTRL8_XL``` is set to 1, ```FS_XL_16g``` set scale to 2g.
-    FS_XL_16g = 0b0000_0100,
-    FS_XL_4g = 0b0000_1000,
-    FS_XL_8g = 0b0000_1100,
-}
-
-/// Possible gyroscope output ranges.
-/// Corresponding to register ```CTRL2_G```
-#[allow(non_camel_case_types)]
-#[allow(dead_code)]
-#[derive(Clone, Copy)]
-pub enum GyroScale {
-    FS_G_125dps = 0b0000_0010,
-    FS_G_250dps = 0b0000_0000,
-    FS_G_500dps = 0b0000_0100,
-    FS_G_1000dps = 0b0000_1000,
-    FS_G_2000dps = 0b0000_1100,
-}
-
-/// Generic axis enum to map various commands.
-pub enum Axis {
-    X,
-    Y,
-    Z,
-}
-
-/// Configures the sensor to detect either only single-taps or both single- and double-taps.
-///
-/// Note: Mapping of the tap detection to **interrupt lines** is **independent** from this.
-/// While double-taps can't be detected *without* detecting single-taps, they **can** be routed to interrupt lines seperately (and also checked seperately).
-pub enum TapMode {
-    Single,
-    SingleAndDouble,
-}
-
-/// Tap configuration
-///
-/// Configure tap recognition for x, y, z axis and set latched interrupts
-#[derive(Clone, Copy)]
-pub struct TapCfg {
-    /// Enable tap detection on seperate axes.
-    pub en_x_y_z: (bool, bool, bool),
-    /// Latched interrupts
-    ///
-    /// When set, the interrupt source has to be checked to clear the interrupt.
-    pub lir: bool,
-}
-
-/// Representation of interrupt pins 1 and 2.
-pub enum InterruptLine {
-    INT1,
-    INT2,
-}
-
-/// Interrupt sources which can be routed to interrupt pins.
-/// Note: This is incomplete right now.
-pub enum InterruptSource {
-    SingleTap,
-    DoubleTap,
-}
-
 /// Commands Enum to specify Command structures
 /// which set various register bits of the lsm.
 ///
@@ -212,13 +122,14 @@ pub enum InterruptSource {
 /// One command will write bits to its assigned register by specifying the register,
 /// the mask and the bits with the impl over the enum.
 /// Since some settings span over multiple registers,
-/// the register function returns register adresses dependent on the command parameters.
-pub enum Command {
+/// the register function returns register addresses dependent on the command parameters.
+#[derive(Clone, Copy)]
+pub(crate) enum Command {
     SwReset,
     SetDataRateXl(DataRate),
-    SetAccelScale(AccelScale),
+    SetAccelScale(AccelerometerScale),
     SetDataRateG(DataRate),
-    SetGyroScale(GyroScale),
+    SetGyroScale(GyroscopeScale),
     TapEnable(TapCfg),
     TapThreshold(Axis, u8),
     TapDuration(u8),
@@ -231,7 +142,7 @@ pub enum Command {
 
 impl Command {
     /// Returns the register address to write to for the specific command.
-    pub fn register(&self) -> Register {
+    pub(crate) fn register(&self) -> Register {
         match *self {
             Command::SwReset => Register::CTRL3_C,
             Command::SetDataRateXl(_) => Register::CTRL1_XL,
@@ -253,8 +164,8 @@ impl Command {
     }
     /// Returns a byte containing data to be written by the command.
     ///
-    /// For bools this is mostly done by converting and shifting to the corresponding position.
-    pub fn bits(&self) -> u8 {
+    /// For booleans this is mostly done by converting and shifting to the corresponding position.
+    pub(crate) fn bits(&self) -> u8 {
         match *self {
             Command::SwReset => 0x01,
             Command::SetDataRateXl(dr) => dr as u8,
@@ -272,14 +183,23 @@ impl Command {
             Command::TapMode(TapMode::Single) => 0 << 7,
             Command::TapMode(TapMode::SingleAndDouble) => 1 << 7,
             Command::InterruptEnable(en) => (en as u8) << 7,
+            Command::MapInterrupt(_, InterruptSource::SleepChange, en) => (en as u8) << 7,
             Command::MapInterrupt(_, InterruptSource::SingleTap, en) => (en as u8) << 6,
+            Command::MapInterrupt(_, InterruptSource::WakeUp, en) => (en as u8) << 5,
+            Command::MapInterrupt(_, InterruptSource::FreeFall, en) => (en as u8) << 4,
             Command::MapInterrupt(_, InterruptSource::DoubleTap, en) => (en as u8) << 3,
+            Command::MapInterrupt(_, InterruptSource::D6d, en) => (en as u8) << 2,
+            Command::MapInterrupt(_, InterruptSource::EmbeddedFunctions, en) => (en as u8) << 1,
+            Command::MapInterrupt(InterruptLine::INT1, InterruptSource::SHUB, en) => (en as u8) << 0,
+            Command::MapInterrupt(InterruptLine::INT2, InterruptSource::Timestamp, en) => (en as u8) << 0,
+            Command::MapInterrupt(InterruptLine::INT2, InterruptSource::SHUB, _) => 0,
+            Command::MapInterrupt(InterruptLine::INT1, InterruptSource::Timestamp, _) => 0,
             Command::SetDataRateG(dr) => dr as u8,
             Command::SetGyroScale(fs) => fs as u8,
         }
     }
     /// Returns the bitmask for the specified Command.
-    pub fn mask(&self) -> u8 {
+    pub(crate) fn mask(&self) -> u8 {
         match *self {
             Command::SwReset => 0x01,
             Command::SetDataRateXl(_) => 0xF0,
@@ -291,8 +211,17 @@ impl Command {
             Command::TapShock(_) => 0x03,
             Command::TapMode(_) => 0x80,
             Command::InterruptEnable(_) => 0x80,
+            Command::MapInterrupt(_, InterruptSource::SleepChange, _) => 0b1000_0000,
             Command::MapInterrupt(_, InterruptSource::SingleTap, _) => 0b0100_0000,
+            Command::MapInterrupt(_, InterruptSource::WakeUp, _) => 0b0010_0000,
+            Command::MapInterrupt(_, InterruptSource::FreeFall, _) => 0b0001_0000,
             Command::MapInterrupt(_, InterruptSource::DoubleTap, _) => 0b0000_1000,
+            Command::MapInterrupt(_, InterruptSource::D6d, _) => 0b0000_0100,
+            Command::MapInterrupt(_, InterruptSource::EmbeddedFunctions, _) => 0b0000_0010,
+            Command::MapInterrupt(InterruptLine::INT1, InterruptSource::SHUB, _) => 0b0000_0001,
+            Command::MapInterrupt(InterruptLine::INT2, InterruptSource::Timestamp, _) => 0b0000_0001,
+            Command::MapInterrupt(InterruptLine::INT2, InterruptSource::SHUB, _) => 0b0000_0000,
+            Command::MapInterrupt(InterruptLine::INT1, InterruptSource::Timestamp, _) => 0b0000_0000,
             Command::SetDataRateG(_) => 0xF0,
             Command::SetGyroScale(_) => 0b0000_1110,
         }
