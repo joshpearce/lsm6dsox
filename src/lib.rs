@@ -5,37 +5,74 @@
 
 #![no_std]
 
-//! This crate implements the LSM6DSOX 3D accelorometer and 3D gyroscope (MEMS) from STMicroelectronics.
+//! Platform-agnostic embedded-hal driver for the STMicroelectronics LSM6DSOX iNEMO inertial module.
+//!
+//! Provided functionality is inspired by the C implementation from ST,
+//! but tries to provide a higher level interface where possible.
+//!
+//! To provide measurements the [accelerometer] traits and [measurements] crate are utilized.
+//! 
+//!
+//!
+//! ## Resources
+//!
+//! [Datasheet](https://www.st.com/resource/en/datasheet/lsm6dsox.pdf)
 //!
 //! [LSM6DSOX at st.com](https://www.st.com/en/mems-and-sensors/lsm6dsox.html)
 //!
-//! To provide the acceleration measurements the [`Accelerometer`][actrait] trait has been implemented.
 //!
-//! [actrait]: https://docs.rs/accelerometer/latest/accelerometer/trait.Accelerometer.html
+//! For application hints please also refer to the
+//! [application note](https://www.st.com/resource/en/application_note/an5272-lsm6dsox-alwayson-3d-accelerometer-and-3d-gyroscope-stmicroelectronics.pdf)
+//! provided by ST.
+//!
+//! # Examples
+//! ```
+//! use lsm6dsox::*;
+//!
+//! let lsm = lsm6dsox::Lsm6dsox::new(
+//!     i2c1,
+//!     SlaveAddress::Low,
+//!     delay,
+//! );
+//!
+//! lsm.setup()?;
+//! lsm.set_accel_sample_rate(DataRate::ODR_52Hz)?;
+//! lsm.set_accel_scale(AccelScale::FS_XL_16g)?;
+//! if let Ok(reading) = lsm.accel_norm() {
+//!     log::info!(
+//!         "Acceleration: {:?}",
+//!         reading
+//!     );
+//! }
+//! ```
 
 mod accel;
 mod gyro;
 mod register;
 pub mod types;
 
+use enumflags2::BitFlags;
 use register::*;
 pub use types::*;
 
 pub use accelerometer;
-use accelerometer::{vector::F32x3, Accelerometer};
+use accelerometer::{
+    vector::{F32x3, I16x3},
+    Accelerometer, RawAccelerometer,
+};
 use byteorder::{ByteOrder, LittleEndian};
 use embedded_hal::blocking::{delay::DelayMs, i2c};
 
 /// Trait for general LSM6DSOX configuration/functionality.
 ///
-/// This Trait mainly exists to be able to specify the needed functionality,
-/// rather then specifing a concrete [Lsm6dsox] in function signatures (which can be tricky with the generics).
+/// This Trait enables the user to specify the needed functionality,
+/// rather then specifying a concrete [Lsm6dsox] in function signatures (which can be tricky with the generics).
 ///
 /// # Examples
 ///
 /// ```
 /// fn takes_a_sensor(mut lsm: impl lsm6dsox::Sensor + lsm6dsox::Lsm6dsoxAccelerometer) {
-///     // Everything from the Sensor and Lsm6dsoxAccelerometer Traits can be used here.
+///     // Everything from the Sensor and Lsm6dsoxAccelerometer traits can be used here.
 /// }
 /// ```
 pub trait Sensor {
@@ -52,7 +89,26 @@ pub trait Sensor {
     /// Checks the interrupt status of all possible sources.
     ///
     /// The interrupt flags will be cleared after this check, or according to the LIR mode of the specific source.
-    fn check_interrupt_sources(&mut self) -> Result<AllIntSrc, Error>;
+    fn check_interrupt_sources(&mut self) -> Result<BitFlags<InterruptCause>, Error>;
+
+    /// Maps an available interrupt source to a available interrupt line.
+    ///
+    /// Toggles whether a interrupt source will generate interrupts on the specified line.
+    /// 
+    /// Note: Interrupt sources [SHUB](InterruptSource::SHUB) and [Timestamp](InterruptSource::Timestamp) are not available on both [interrupt lines](InterruptLine).
+    ///
+    /// Interrupts need to be enabled globally for a mapping to take effect. See [`Sensor::enable_interrupts()`].
+    fn map_interrupt(
+        &mut self,
+        int_src: InterruptSource,
+        int_line: InterruptLine,
+        active: bool,
+    ) -> Result<(), Error>;
+
+    /// Enable basic interrupts
+    ///
+    /// Enables/disables interrupts for 6D/4D, free-fall, wake-up, tap, inactivity.
+    fn enable_interrupts(&mut self, enabled: bool) -> Result<(), Error>;
 
     /// Sets both Accelerometer and Gyroscope in power-down mode.
     fn power_down_mode(&mut self) -> Result<(), Error>;
@@ -66,21 +122,26 @@ pub trait Lsm6dsoxAccelerometer: Accelerometer {
     /// Sets the acceleration measurement range.
     ///
     /// Values up to this scale will be reported correctly.
-    fn set_accel_scale(&mut self, scale: AccelScale) -> Result<(), Error>;
+    fn set_accel_scale(&mut self, scale: AccelerometerScale) -> Result<(), Error>;
 
     /// Sets up double-tap recognition and enables Interrupts on INT2 pin.
     ///
     /// Configures everything necessary to reasonable defaults.
     /// This includes setting the accelerometer scale to 2G, configuring power modes, setting values for thresholds
-    /// and mapping to INT2 interrupt pin.
-    fn setup_tap_detection(&mut self, tap_cfg: TapCfg, tap_mode: TapMode) -> Result<(), Error>;
+    /// and optionally mapping a interrupt pin, maps only single-tap or double-tap to the pin.
+    fn setup_tap_detection(
+        &mut self,
+        tap_cfg: TapCfg,
+        tap_mode: TapMode,
+        int_line: Option<InterruptLine>,
+    ) -> Result<(), Error>;
 
-    /// Checks if a double-tap occured.
+    /// Checks the tap source register.
     ///
-    /// The Register will be cleared according to the LIR setting.
-    /// The interrupt flag will be cleared after this check, or according to the LIR mode.
-    /// If LIR is set to `False` the interrupt will be set for the quiet-time window and clears automatically after that.
-    fn check_tap(&mut self) -> Result<bool, Error>;
+    /// - The Register will be cleared according to the LIR setting.
+    /// - The interrupt flag will be cleared after this check, or according to the LIR mode.
+    /// - If LIR is set to `False` the interrupt will be set for the quiet-time window and clears automatically after that.
+    fn check_tap(&mut self) -> Result<BitFlags<TapSource>, Error>;
 
     /// Sets the tap Threshold for each individual axis.
     ///
@@ -127,19 +188,26 @@ pub trait Lsm6dsoxAccelerometer: Accelerometer {
     fn set_tap_shock(&mut self, shock: u8) -> Result<(), Error>;
 }
 /// Trait to implement LSM6DSOX specific gyroscope functions.
-pub trait Gyroscope {
+pub trait Lsm6dsoxGyroscope {
     /// Sets the measurement output rate.
+    ///
+    /// Note: [DataRate::Freq1Hz6] is not supported by the gyroscope and will yield an [Error::InvalidData].
     fn set_gyro_sample_rate(&mut self, odr: DataRate) -> Result<(), Error>;
 
     /// Sets the gyroscope measurement range.
     ///
     /// Values up to this scale will be reported correctly.
-    fn set_gyro_scale(&mut self, scale: GyroScale) -> Result<(), Error>;
+    fn set_gyro_scale(&mut self, scale: GyroscopeScale) -> Result<(), Error>;
 
-    /// Get a angular rate (deg/s) reading.
+    /// Get a angular rate reading.
     ///
-    /// If no data is ready returns the apropiate [Error].
+    /// If no data is ready returns the appropriate [Error].
     fn angular_rate(&mut self) -> Result<AngularRate, Error>;
+
+    /// Get a *raw* angular rate reading.
+    ///
+    /// If no data is ready returns the appropriate [Error].
+    fn angular_rate_raw(&mut self) -> Result<RawAngularRate, Error>;
 }
 /// Representation of a LSM6DSOX. Stores the address and device peripherals.
 pub struct Lsm6dsox<I2C, Delay>
@@ -204,16 +272,14 @@ where
             self.update_reg_bits(Register::CTRL3_C, 0b0100_0000, 0b0100_0000)?;
 
             /* Power-Down gyroscope */
-            self.update_reg_command(Command::SetDataRateG(DataRate::ODR_PD))?;
-            self.config.g_odr = DataRate::ODR_PD;
+            self.update_reg_command(Command::SetDataRateG(DataRate::PowerDown))?;
+            self.config.g_odr = DataRate::PowerDown;
 
             /* Set Output Data Rate */
-            self.set_accel_sample_rate(DataRate::ODR_52Hz)?;
+            self.set_accel_sample_rate(DataRate::Freq52Hz)?;
             // Output data rate and full scale could be set with one register update, but extra code for that seems unnecessary
             /* Set full scale */
-            // TODO implement xl change function and use here
-            self.update_reg_command(Command::SetAccelScale(AccelScale::FS_XL_4g))?;
-            self.config.xl_scale = AccelScale::FS_XL_4g;
+            self.set_accel_scale(AccelerometerScale::Accel4g)?;
 
             /* Wait stable output */
             self.delay.delay_ms(100);
@@ -222,21 +288,41 @@ where
         }
     }
 
-    fn check_interrupt_sources(&mut self) -> Result<AllIntSrc, Error> {
+    fn check_interrupt_sources(&mut self) -> Result<BitFlags<InterruptCause>, Error> {
         let mut buf = 0;
         self.read_reg_byte(Register::ALL_INT_SRC, &mut buf)?;
+        let flags = BitFlags::from_bits(buf).map_err(|_| Error::InvalidData)?;
 
-        Ok(AllIntSrc::new(buf))
+        Ok(flags)
     }
 
     fn power_down_mode(&mut self) -> core::result::Result<(), Error> {
-        self.update_reg_command(Command::SetDataRateXl(DataRate::ODR_PD))?;
-        self.config.xl_odr = DataRate::ODR_PD;
+        self.update_reg_command(Command::SetDataRateXl(DataRate::PowerDown))?;
+        self.config.xl_odr = DataRate::PowerDown;
 
-        self.update_reg_command(Command::SetDataRateG(DataRate::ODR_PD))?;
-        self.config.g_odr = DataRate::ODR_PD;
+        self.update_reg_command(Command::SetDataRateG(DataRate::PowerDown))?;
+        self.config.g_odr = DataRate::PowerDown;
 
         Ok(())
+    }
+    fn map_interrupt(
+        &mut self,
+        int_src: InterruptSource,
+        int_line: InterruptLine,
+        active: bool,
+    ) -> Result<(), types::Error> {
+        // TODO track interrupt mapping state in config
+        //  This would allow us to automatically enable or disable interrupts globally.
+
+        match (int_line, int_src) {
+            (InterruptLine::INT1, InterruptSource::Timestamp) => Err(Error::NotSupported),
+            (InterruptLine::INT2, InterruptSource::SHUB) => Err(Error::NotSupported),
+            (_, _) => self.update_reg_command(Command::MapInterrupt(int_line, int_src, active)),
+        }
+    }
+
+    fn enable_interrupts(&mut self, enabled: bool) -> Result<(), Error> {
+        self.update_reg_command(Command::InterruptEnable(enabled))
     }
 }
 
@@ -252,10 +338,10 @@ where
             address,
             delay,
             config: Configuration {
-                xl_odr: DataRate::ODR_PD,
-                xl_scale: AccelScale::FS_XL_2g,
-                g_odr: DataRate::ODR_PD,
-                g_scale: GyroScale::FS_G_250dps,
+                xl_odr: DataRate::PowerDown,
+                xl_scale: AccelerometerScale::Accel2g,
+                g_odr: DataRate::PowerDown,
+                g_scale: GyroscopeScale::Dps250,
             },
         }
     }

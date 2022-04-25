@@ -4,19 +4,25 @@
 // For details on the licensing terms, see the LICENSE file.
 
 use super::*;
+use measurements::AngularVelocity;
 
-impl<I2C, Delay> Gyroscope for Lsm6dsox<I2C, Delay>
+impl<I2C, Delay> Lsm6dsoxGyroscope for Lsm6dsox<I2C, Delay>
 where
     I2C: i2c::Write + i2c::WriteRead,
     Delay: DelayMs<u32>,
 {
     fn set_gyro_sample_rate(&mut self, data_rate: DataRate) -> Result<(), Error> {
-        self.update_reg_command(Command::SetDataRateG(data_rate))?;
-        self.config.g_odr = data_rate;
-        Ok(())
+        match data_rate {
+            DataRate::Freq1Hz6 => return Err(Error::NotSupported),
+            _ => {
+                self.update_reg_command(Command::SetDataRateG(data_rate))?;
+                self.config.g_odr = data_rate;
+                Ok(())
+            }
+        }
     }
 
-    fn set_gyro_scale(&mut self, scale: GyroScale) -> Result<(), Error> {
+    fn set_gyro_scale(&mut self, scale: GyroscopeScale) -> Result<(), Error> {
         self.update_reg_command(Command::SetGyroScale(scale))?;
         self.config.g_scale = scale;
         Ok(())
@@ -37,38 +43,21 @@ where
                 )
                 .map_err(|_| Error::I2cReadError)?;
             let mut data: [f32; 3] = [0.0; 3];
+            let factor = self.config.g_scale.to_factor();
             for i in 0..3 {
-                match self.config.g_scale {
-                    // Following values have be copied from the official ST driver.
-                    // They correspond nicely to the scarce examples from the application note,
-                    // but otherwise doesnt make much sense (calculate scale/32767 and you'll get slightly different values)
-                    GyroScale::FS_G_125dps => {
-                        data[i] =
-                            LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]) as f32 * 0.004375
-                    }
-                    GyroScale::FS_G_250dps => {
-                        data[i] =
-                            LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]) as f32 * 0.008750
-                    }
-                    GyroScale::FS_G_500dps => {
-                        data[i] =
-                            LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]) as f32 * 0.01750
-                    }
-                    GyroScale::FS_G_1000dps => {
-                        data[i] =
-                            LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]) as f32 * 0.0350
-                    }
-                    GyroScale::FS_G_2000dps => {
-                        data[i] = LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]) as f32 * 0.070
-                    }
-                }
+                data[i] = LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]) as f32 * factor;
             }
 
+
             Ok(AngularRate {
-                x: data[0],
-                y: data[1],
-                z: data[2],
+                x: AngularVelocity::from_hertz((data[0]/360.0).into()),
+                y: AngularVelocity::from_hertz((data[1]/360.0).into()),
+                z: AngularVelocity::from_hertz((data[2]/360.0).into()),
             })
         }
+    }
+
+    fn angular_rate_raw(&mut self) -> Result<RawAngularRate, Error> {
+        todo!()
     }
 }
