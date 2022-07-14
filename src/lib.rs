@@ -36,8 +36,8 @@
 //! );
 //!
 //! lsm.setup()?;
-//! lsm.set_accel_sample_rate(DataRate::ODR_52Hz)?;
-//! lsm.set_accel_scale(AccelScale::FS_XL_16g)?;
+//! lsm.set_accel_sample_rate(DataRate::Freq52Hz)?;
+//! lsm.set_accel_scale(AccelScale::Accel16g)?;
 //! if let Ok(reading) = lsm.accel_norm() {
 //!     log::info!(
 //!         "Acceleration: {:?}",

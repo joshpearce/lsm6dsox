@@ -9,6 +9,7 @@
 
 use enumflags2::bitflags;
 use measurements::AngularVelocity;
+use num_enum::TryFromPrimitive;
 
 /// Lsm6dsox errors
 #[derive(Clone, Copy, Debug)]
@@ -122,7 +123,8 @@ pub(crate) struct Configuration {
 /// This enum corresponds to registers `CTRL1_XL` and `CTRL2_G`.
 /// See the [Datasheet](https://www.st.com/resource/en/datasheet/lsm6dsox.pdf) for more information on data rates.
 #[allow(dead_code)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, TryFromPrimitive)]
+#[repr(u8)]
 pub enum DataRate {
     /// Power down state
     PowerDown = 0b0000_0000,
@@ -171,6 +173,25 @@ pub enum DataRate {
     ///
     /// (high performance)
     Freq6660Hz = 0b1010_0000,
+}
+
+impl From<DataRate> for f32 {
+    fn from(data_rate: DataRate) -> f32{
+        match data_rate {
+            DataRate::PowerDown => 0.0,
+            DataRate::Freq1Hz6 => 1.6,
+            DataRate::Freq12Hz5 => 12.5,
+            DataRate::Freq26Hz => 26.0,
+            DataRate::Freq52Hz => 52.0,
+            DataRate::Freq104Hz => 104.0,
+            DataRate::Freq208Hz => 208.0,
+            DataRate::Freq416Hz => 416.0,
+            DataRate::Freq833Hz => 833.0,
+            DataRate::Freq1660Hz => 1660.0,
+            DataRate::Freq3330Hz => 3330.0,
+            DataRate::Freq6660Hz => 6660.0,
+        }
+    }
 }
 
 /// Possible accelerometer output ranges

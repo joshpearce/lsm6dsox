@@ -3,6 +3,8 @@
 // Licensed under the Open Logistics License 1.0.
 // For details on the licensing terms, see the LICENSE file.
 
+use core::convert::TryFrom;
+
 use super::*;
 
 impl<I2C, Delay> Accelerometer for Lsm6dsox<I2C, Delay>
@@ -55,61 +57,9 @@ where
             .write_read(self.address as u8, &[Register::CTRL1_XL as u8], &mut buf)
             .map_err(|_| Error::I2cReadError)?;
 
-        // This match compares the raw sample rate readout with the DataRate enum.
-        // Rust lacks the ability to match an enum with a int directly,
-        // so it has to be done with this construct (more or less a more readable nested if).
-        match buf[0] & 0xF0 {
-            x if x == DataRate::PowerDown as u8 => {
-                self.config.xl_odr = DataRate::PowerDown;
-                Ok(0.0)
-            }
-            x if x == DataRate::Freq1Hz6 as u8 => {
-                self.config.xl_odr = DataRate::Freq1Hz6;
-                Ok(1.6)
-            }
-            x if x == DataRate::Freq12Hz5 as u8 => {
-                self.config.xl_odr = DataRate::Freq12Hz5;
-                Ok(12.5)
-            }
-            x if x == DataRate::Freq26Hz as u8 => {
-                self.config.xl_odr = DataRate::Freq26Hz;
-                Ok(26.0)
-            }
-            x if x == DataRate::Freq52Hz as u8 => {
-                self.config.xl_odr = DataRate::Freq52Hz;
-                Ok(52.0)
-            }
-            x if x == DataRate::Freq104Hz as u8 => {
-                self.config.xl_odr = DataRate::Freq104Hz;
-                Ok(104.0)
-            }
-            x if x == DataRate::Freq208Hz as u8 => {
-                self.config.xl_odr = DataRate::Freq208Hz;
-                Ok(208.0)
-            }
-            x if x == DataRate::Freq416Hz as u8 => {
-                self.config.xl_odr = DataRate::Freq416Hz;
-                Ok(416.0)
-            }
-            x if x == DataRate::Freq833Hz as u8 => {
-                self.config.xl_odr = DataRate::Freq833Hz;
-                Ok(833.0)
-            }
-            x if x == DataRate::Freq1660Hz as u8 => {
-                self.config.xl_odr = DataRate::Freq1660Hz;
-                Ok(1660.0)
-            }
-            x if x == DataRate::Freq3330Hz as u8 => {
-                self.config.xl_odr = DataRate::Freq3330Hz;
-                Ok(3330.0)
-            }
-            x if x == DataRate::Freq6660Hz as u8 => {
-                self.config.xl_odr = DataRate::Freq6660Hz;
-                Ok(6660.0)
-            }
-            // in all other cases the sensor reported an unspecified/invalid data rate.
-            _ => Err(accelerometer::Error::new(accelerometer::ErrorKind::Device)),
-        }
+        let sample_rate = DataRate::try_from(buf[0] & 0xF0).map_err(|_| accelerometer::Error::new(accelerometer::ErrorKind::Device))?;
+        self.config.xl_odr = sample_rate;
+        Ok(sample_rate.into())
     }
 }
 

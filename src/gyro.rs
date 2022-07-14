@@ -58,6 +58,30 @@ where
     }
 
     fn angular_rate_raw(&mut self) -> Result<RawAngularRate, Error> {
-        todo!()
+        let mut data_rdy: u8 = 0;
+        self.read_reg_byte(Register::STATUS_REG, &mut data_rdy)?;
+        if (data_rdy & 0b000_010) == 0 {
+            Err(Error::NoDataReady)
+        } else {
+            let mut data_raw: [u8; 6] = [0; 6]; // All 3 axes x, y, z i16 values, decoded little endian, 2nd Complement
+            self.i2c
+                .write_read(
+                    self.address as u8,
+                    &[Register::OUTX_L_G as u8],
+                    &mut data_raw,
+                )
+                .map_err(|_| Error::I2cReadError)?;
+            let mut data: [i16; 3] = [0; 3];
+            for i in 0..3 {
+                data[i] = LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]);
+            }
+
+
+            Ok(RawAngularRate {
+                x: data[0],
+                y: data[1],
+                z: data[2],
+            })
+        }
     }
 }
