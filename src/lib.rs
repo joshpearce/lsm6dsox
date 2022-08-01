@@ -26,24 +26,31 @@
 //! provided by ST.
 //!
 //! # Examples
-//! ```
+//! ```no_run
+//! # extern crate embedded_hal;
+//! # extern crate embedded_hal_mock;
+//! # use embedded_hal::prelude::*;
+//! # use embedded_hal_mock::i2c::{Mock as I2cMock, Transaction as I2cTransaction};
+//! # use embedded_hal_mock::delay::MockNoop;
+//! use accelerometer::Accelerometer;
 //! use lsm6dsox::*;
 //!
-//! let lsm = lsm6dsox::Lsm6dsox::new(
-//!     i2c1,
-//!     SlaveAddress::Low,
-//!     delay,
-//! );
+//! # fn main() {
+//! # example().unwrap();
+//! # }
+//! # fn example() -> Result<(), Error> {
+//! # let i2c = I2cMock::new(&Vec::new());
+//! # let delay = MockNoop::new();
+//! let mut lsm = lsm6dsox::Lsm6dsox::new(i2c, SlaveAddress::Low, delay);
 //!
 //! lsm.setup()?;
 //! lsm.set_accel_sample_rate(DataRate::Freq52Hz)?;
-//! lsm.set_accel_scale(AccelScale::Accel16g)?;
+//! lsm.set_accel_scale(AccelerometerScale::Accel16g)?;
 //! if let Ok(reading) = lsm.accel_norm() {
-//!     log::info!(
-//!         "Acceleration: {:?}",
-//!         reading
-//!     );
+//!     println!("Acceleration: {:?}", reading);
 //! }
+//! # Ok(())
+//! # }
 //! ```
 
 mod accel;
