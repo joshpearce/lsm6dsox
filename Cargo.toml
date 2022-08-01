@@ -3,6 +3,7 @@ name = "lsm6dsox"
 version = "1.0.0"
 authors = [ "Fraunhofer IML Embedded Rust Group <embedded-rust@iml.fraunhofer.de>" ]
 edition = "2018"
+license-file = "LICENSE"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
