@@ -13,7 +13,7 @@ where
 {
     fn set_gyro_sample_rate(&mut self, data_rate: DataRate) -> Result<(), Error> {
         match data_rate {
-            DataRate::Freq1Hz6 => return Err(Error::NotSupported),
+            DataRate::Freq1Hz6 => Err(Error::NotSupported),
             _ => {
                 self.update_reg_command(Command::SetDataRateG(data_rate))?;
                 self.config.g_odr = data_rate;
@@ -31,7 +31,8 @@ where
     fn angular_rate(&mut self) -> Result<AngularRate, Error> {
         let mut data_rdy: u8 = 0;
         self.read_reg_byte(Register::STATUS_REG, &mut data_rdy)?;
-        if (data_rdy & 0b000_010) == 0 {
+        if (data_rdy & 0b0000_0010) == 0 {
+            // bit 2 of STATUS_REG indicates if gyro data is available
             Err(Error::NoDataReady)
         } else {
             let mut data_raw: [u8; 6] = [0; 6]; // All 3 axes x, y, z i16 values, decoded little endian, 2nd Complement
@@ -48,11 +49,10 @@ where
                 data[i] = LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]) as f32 * factor;
             }
 
-
             Ok(AngularRate {
-                x: AngularVelocity::from_hertz((data[0]/360.0).into()),
-                y: AngularVelocity::from_hertz((data[1]/360.0).into()),
-                z: AngularVelocity::from_hertz((data[2]/360.0).into()),
+                x: AngularVelocity::from_hertz((data[0] / 360.0).into()),
+                y: AngularVelocity::from_hertz((data[1] / 360.0).into()),
+                z: AngularVelocity::from_hertz((data[2] / 360.0).into()),
             })
         }
     }
@@ -60,7 +60,8 @@ where
     fn angular_rate_raw(&mut self) -> Result<RawAngularRate, Error> {
         let mut data_rdy: u8 = 0;
         self.read_reg_byte(Register::STATUS_REG, &mut data_rdy)?;
-        if (data_rdy & 0b000_010) == 0 {
+        if (data_rdy & 0b0000_0010) == 0 {
+            // bit 2 of STATUS_REG indicates if gyro data is available
             Err(Error::NoDataReady)
         } else {
             let mut data_raw: [u8; 6] = [0; 6]; // All 3 axes x, y, z i16 values, decoded little endian, 2nd Complement
@@ -75,7 +76,6 @@ where
             for i in 0..3 {
                 data[i] = LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]);
             }
-
 
             Ok(RawAngularRate {
                 x: data[0],

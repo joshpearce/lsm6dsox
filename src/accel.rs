@@ -57,7 +57,8 @@ where
             .write_read(self.address as u8, &[Register::CTRL1_XL as u8], &mut buf)
             .map_err(|_| Error::I2cReadError)?;
 
-        let sample_rate = DataRate::try_from(buf[0] & 0xF0).map_err(|_| accelerometer::Error::new(accelerometer::ErrorKind::Device))?;
+        let sample_rate = DataRate::try_from(buf[0] & 0xF0)
+            .map_err(|_| accelerometer::Error::new(accelerometer::ErrorKind::Device))?;
         self.config.xl_odr = sample_rate;
         Ok(sample_rate.into())
     }

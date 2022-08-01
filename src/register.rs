@@ -190,8 +190,8 @@ impl Command {
             Command::MapInterrupt(_, InterruptSource::DoubleTap, en) => (en as u8) << 3,
             Command::MapInterrupt(_, InterruptSource::D6d, en) => (en as u8) << 2,
             Command::MapInterrupt(_, InterruptSource::EmbeddedFunctions, en) => (en as u8) << 1,
-            Command::MapInterrupt(InterruptLine::INT1, InterruptSource::SHUB, en) => (en as u8) << 0,
-            Command::MapInterrupt(InterruptLine::INT2, InterruptSource::Timestamp, en) => (en as u8) << 0,
+            Command::MapInterrupt(InterruptLine::INT1, InterruptSource::SHUB, en) => en as u8,
+            Command::MapInterrupt(InterruptLine::INT2, InterruptSource::Timestamp, en) => en as u8,
             Command::MapInterrupt(InterruptLine::INT2, InterruptSource::SHUB, _) => 0,
             Command::MapInterrupt(InterruptLine::INT1, InterruptSource::Timestamp, _) => 0,
             Command::SetDataRateG(dr) => dr as u8,
@@ -219,9 +219,13 @@ impl Command {
             Command::MapInterrupt(_, InterruptSource::D6d, _) => 0b0000_0100,
             Command::MapInterrupt(_, InterruptSource::EmbeddedFunctions, _) => 0b0000_0010,
             Command::MapInterrupt(InterruptLine::INT1, InterruptSource::SHUB, _) => 0b0000_0001,
-            Command::MapInterrupt(InterruptLine::INT2, InterruptSource::Timestamp, _) => 0b0000_0001,
+            Command::MapInterrupt(InterruptLine::INT2, InterruptSource::Timestamp, _) => {
+                0b0000_0001
+            }
             Command::MapInterrupt(InterruptLine::INT2, InterruptSource::SHUB, _) => 0b0000_0000,
-            Command::MapInterrupt(InterruptLine::INT1, InterruptSource::Timestamp, _) => 0b0000_0000,
+            Command::MapInterrupt(InterruptLine::INT1, InterruptSource::Timestamp, _) => {
+                0b0000_0000
+            }
             Command::SetDataRateG(_) => 0xF0,
             Command::SetGyroScale(_) => 0b0000_1110,
         }

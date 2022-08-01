@@ -11,7 +11,7 @@
 //! but tries to provide a higher level interface where possible.
 //!
 //! To provide measurements the [accelerometer] traits and [measurements] crate are utilized.
-//! 
+//!
 //!
 //!
 //! ## Resources
@@ -94,7 +94,7 @@ pub trait Sensor {
     /// Maps an available interrupt source to a available interrupt line.
     ///
     /// Toggles whether a interrupt source will generate interrupts on the specified line.
-    /// 
+    ///
     /// Note: Interrupt sources [SHUB](InterruptSource::SHUB) and [Timestamp](InterruptSource::Timestamp) are not available on both [interrupt lines](InterruptLine).
     ///
     /// Interrupts need to be enabled globally for a mapping to take effect. See [`Sensor::enable_interrupts()`].
@@ -360,9 +360,9 @@ where
             .map_err(|_| Error::I2cReadError)?;
 
         // First set `bitmask` bits to zero,
-        buf[0] = buf[0] & !bitmask;
+        buf[0] &= !bitmask;
         // then write our data to these bits.
-        buf[0] = buf[0] | (data & bitmask);
+        buf[0] |= data & bitmask;
 
         // A write takes the register address as first byte, the data as second.
         let update = [reg as u8, buf[0]];

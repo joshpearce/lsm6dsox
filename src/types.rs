@@ -22,7 +22,7 @@ pub enum Error {
     NotSupported,
 }
 /// Angular rate measurement result
-/// 
+///
 /// Holds three [AngularVelocity] measurements.
 #[derive(Clone, Copy, Debug)]
 pub struct AngularRate {
@@ -32,7 +32,7 @@ pub struct AngularRate {
 }
 
 /// Raw Angular rate measurement result
-/// 
+///
 /// Holds three [i16] measurements.
 
 // TODO: maybe use a micromath vector here
@@ -108,7 +108,6 @@ pub(crate) struct Configuration {
     pub g_scale: GyroscopeScale,
 }
 
-
 /// Possible output data rates for both Accelerometer and Gyroscope
 ///
 /// ## Power mode
@@ -176,7 +175,7 @@ pub enum DataRate {
 }
 
 impl From<DataRate> for f32 {
-    fn from(data_rate: DataRate) -> f32{
+    fn from(data_rate: DataRate) -> f32 {
         match data_rate {
             DataRate::PowerDown => 0.0,
             DataRate::Freq1Hz6 => 1.6,
@@ -330,13 +329,13 @@ pub enum InterruptSource {
     /// Embedded functions events
     EmbeddedFunctions,
     /// Sensor hub communication concluded events
-    /// 
+    ///
     /// Note: Only available on [InterruptLine::INT1]
     SHUB,
     /// Alert for timestamp overflows
-    /// 
+    ///
     /// Reported within 6.4ms.
-    /// 
+    ///
     /// Note: Only available on [InterruptLine::INT2]
     Timestamp,
 }
