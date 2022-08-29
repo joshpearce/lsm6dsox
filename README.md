@@ -15,3 +15,7 @@ Plattform-agnostic embedded-hal driver for the ST LSM6DSOX iNEMO inertial module
 - Tap recognition
 - Interrupts
 - Further features may be added in the future
+
+## Contacts
+
+Fraunhofer IML Embedded Rust Group - <embedded-rust@iml.fraunhofer.de>
