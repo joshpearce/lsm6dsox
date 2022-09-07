@@ -48,7 +48,7 @@ pub struct RawAngularRate {
 ///
 /// Reports which sources triggered an interrupt,
 /// which hasn't been cleared yet.
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 #[bitflags]
 #[repr(u8)]
 pub enum InterruptCause {
@@ -64,7 +64,7 @@ pub enum InterruptCause {
 /// Tap source register
 ///
 /// Holds information about tap events.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[bitflags]
 #[repr(u8)]
 pub enum TapSource {
