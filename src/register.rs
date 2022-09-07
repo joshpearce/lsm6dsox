@@ -198,7 +198,7 @@ impl Command {
             Command::SetGyroScale(fs) => fs as u8,
         }
     }
-    /// Returns the bitmask for the specified Command.
+    /// Returns the bit mask for the specified Command.
     pub(crate) fn mask(&self) -> u8 {
         match *self {
             Command::SwReset => 0x01,

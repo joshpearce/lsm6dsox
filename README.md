@@ -1,6 +1,6 @@
 # LSM6DSOX
 
-Plattform-agnostic embedded-hal driver for the ST LSM6DSOX iNEMO inertial module.
+Platform-agnostic embedded-hal driver for the ST LSM6DSOX iNEMO inertial module.
 
 ## Resources
 

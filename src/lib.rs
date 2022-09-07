@@ -183,7 +183,7 @@ pub trait Lsm6dsoxAccelerometer: Accelerometer {
     /// [^note]: Definition from the LSM6DSOX Application Note
     fn set_tap_quiet(&mut self, quiet: u8) -> Result<(), Error>;
 
-    /// Sets the maximum duration of overthreshold event. Default value: `0b00`
+    /// Sets the maximum duration of the over-threshold event. Default value: `0b00`
     ///
     /// The Shock time window defines the maximum duration of the overcoming threshold event: the acceleration must
     /// return below the threshold before the Shock window has expired, otherwise the tap event is not detected. The
