@@ -40,7 +40,7 @@ test:
 license-information:
   stage: deploy
   script:
-    - list-sele-dependencies --check
+    - check-sele-licenses --check
 
 pages:
   stage: deploy
