@@ -6,12 +6,15 @@
 use super::*;
 use measurements::AngularVelocity;
 
-impl<I2C, Delay> Lsm6dsoxGyroscope for Lsm6dsox<I2C, Delay>
+impl<I2C, Delay> Lsm6dsox<I2C, Delay>
 where
     I2C: i2c::Write + i2c::WriteRead,
     Delay: DelayMs<u32>,
 {
-    fn set_gyro_sample_rate(&mut self, data_rate: DataRate) -> Result<(), Error> {
+    /// Sets the measurement output rate.
+    ///
+    /// Note: [DataRate::Freq1Hz6] is not supported by the gyroscope and will yield an [Error::InvalidData].
+    pub fn set_gyro_sample_rate(&mut self, data_rate: DataRate) -> Result<(), Error> {
         match data_rate {
             DataRate::Freq1Hz6 => Err(Error::NotSupported),
             _ => {
@@ -22,13 +25,19 @@ where
         }
     }
 
-    fn set_gyro_scale(&mut self, scale: GyroscopeScale) -> Result<(), Error> {
+    /// Sets the gyroscope measurement range.
+    ///
+    /// Values up to this scale will be reported correctly.
+    pub fn set_gyro_scale(&mut self, scale: GyroscopeScale) -> Result<(), Error> {
         self.update_reg_command(Command::SetGyroScale(scale))?;
         self.config.g_scale = scale;
         Ok(())
     }
 
-    fn angular_rate(&mut self) -> Result<AngularRate, Error> {
+    /// Get a angular rate reading.
+    ///
+    /// If no data is ready returns the appropriate [Error].
+    pub fn angular_rate(&mut self) -> Result<AngularRate, Error> {
         let mut data_rdy: u8 = 0;
         self.read_reg_byte(Register::STATUS_REG, &mut data_rdy)?;
         if (data_rdy & 0b0000_0010) == 0 {
@@ -57,7 +66,10 @@ where
         }
     }
 
-    fn angular_rate_raw(&mut self) -> Result<RawAngularRate, Error> {
+    /// Get a *raw* angular rate reading.
+    ///
+    /// If no data is ready returns the appropriate [Error].
+    pub fn angular_rate_raw(&mut self) -> Result<RawAngularRate, Error> {
         let mut data_rdy: u8 = 0;
         self.read_reg_byte(Register::STATUS_REG, &mut data_rdy)?;
         if (data_rdy & 0b0000_0010) == 0 {

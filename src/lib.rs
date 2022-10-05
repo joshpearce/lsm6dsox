@@ -70,152 +70,6 @@ use accelerometer::{
 use byteorder::{ByteOrder, LittleEndian};
 use embedded_hal::blocking::{delay::DelayMs, i2c};
 
-/// Trait for general LSM6DSOX configuration/functionality.
-///
-/// This Trait enables the user to specify the needed functionality,
-/// rather then specifying a concrete [Lsm6dsox] in function signatures (which can be tricky with the generics).
-///
-/// # Examples
-///
-/// ```
-/// fn takes_a_sensor(mut lsm: impl lsm6dsox::Sensor + lsm6dsox::Lsm6dsoxAccelerometer) {
-///     // Everything from the Sensor and Lsm6dsoxAccelerometer traits can be used here.
-/// }
-/// ```
-pub trait Sensor {
-    /// Check whether the configured Sensor returns its correct id.
-    ///
-    /// Returns `Ok(id)` if `id` matches the Standard LSM6DSOX id,
-    /// `Err(Some(id))` or `Err(None)` if `id` doesn't match or couldn't be read.
-    fn check_id(&mut self) -> Result<u8, Option<u8>>;
-
-    /// Initializes the sensor.
-    /// A software reset is performed and common settings are applied.
-    fn setup(&mut self) -> Result<(), Error>;
-
-    /// Checks the interrupt status of all possible sources.
-    ///
-    /// The interrupt flags will be cleared after this check, or according to the LIR mode of the specific source.
-    fn check_interrupt_sources(&mut self) -> Result<BitFlags<InterruptCause>, Error>;
-
-    /// Maps an available interrupt source to a available interrupt line.
-    ///
-    /// Toggles whether a interrupt source will generate interrupts on the specified line.
-    ///
-    /// Note: Interrupt sources [SHUB](InterruptSource::SHUB) and [Timestamp](InterruptSource::Timestamp) are not available on both [interrupt lines](InterruptLine).
-    ///
-    /// Interrupts need to be enabled globally for a mapping to take effect. See [`Sensor::enable_interrupts()`].
-    fn map_interrupt(
-        &mut self,
-        int_src: InterruptSource,
-        int_line: InterruptLine,
-        active: bool,
-    ) -> Result<(), Error>;
-
-    /// Enable basic interrupts
-    ///
-    /// Enables/disables interrupts for 6D/4D, free-fall, wake-up, tap, inactivity.
-    fn enable_interrupts(&mut self, enabled: bool) -> Result<(), Error>;
-
-    /// Sets both Accelerometer and Gyroscope in power-down mode.
-    fn power_down_mode(&mut self) -> Result<(), Error>;
-}
-
-/// Trait to implement LSM6DSOX specific accelerometer functions.
-pub trait Lsm6dsoxAccelerometer: Accelerometer {
-    /// Sets the measurement output rate.
-    fn set_accel_sample_rate(&mut self, data_rate: DataRate) -> Result<(), Error>;
-
-    /// Sets the acceleration measurement range.
-    ///
-    /// Values up to this scale will be reported correctly.
-    fn set_accel_scale(&mut self, scale: AccelerometerScale) -> Result<(), Error>;
-
-    /// Sets up double-tap recognition and enables Interrupts on INT2 pin.
-    ///
-    /// Configures everything necessary to reasonable defaults.
-    /// This includes setting the accelerometer scale to 2G, configuring power modes, setting values for thresholds
-    /// and optionally mapping a interrupt pin, maps only single-tap or double-tap to the pin.
-    fn setup_tap_detection(
-        &mut self,
-        tap_cfg: TapCfg,
-        tap_mode: TapMode,
-        int_line: Option<InterruptLine>,
-    ) -> Result<(), Error>;
-
-    /// Checks the tap source register.
-    ///
-    /// - The Register will be cleared according to the LIR setting.
-    /// - The interrupt flag will be cleared after this check, or according to the LIR mode.
-    /// - If LIR is set to `False` the interrupt will be set for the quiet-time window and clears automatically after that.
-    fn check_tap(&mut self) -> Result<BitFlags<TapSource>, Error>;
-
-    /// Sets the tap Threshold for each individual axis.
-    ///
-    /// [...] [These registers] are used to select the unsigned threshold value used to detect
-    /// the tap event on the respective axis. The value of 1 LSB of these 5 bits depends on the selected accelerometer
-    /// full scale: 1 LSB = (FS_XL)/(2⁵). The unsigned threshold is applied to both positive and negative slope data.[^note]
-    ///
-    /// [^note]: Definition from the LSM6DSOX Application Note
-    fn set_tap_threshold(&mut self, x: u8, y: u8, z: u8) -> Result<(), Error>;
-
-    /// Sets the duration of maximum time gap for double tap recognition. Default value: `0b0000`
-    ///
-    /// In the double-tap case, the Duration time window defines the maximum time between two consecutive detected
-    /// taps. The Duration time period starts just after the completion of the Quiet time of the first tap. The `DUR[3:0]` bits
-    /// of the `INT_DUR2` register are used to set the Duration time window value: the default value of these bits is `0000b`
-    /// and corresponds to `16/ODR_XL` time, where `ODR_XL` is the accelerometer output data rate. If the `DUR[3:0]` bits
-    /// are set to a different value, 1 LSB corresponds to `32/ODR_XL` time.[^note]
-    ///
-    /// [^note]: Definition from the LSM6DSOX Application Note
-    fn set_tap_duration(&mut self, dur: u8) -> Result<(), Error>;
-
-    /// Sets the expected quiet time after a tap detection. Default value: `0b00`
-    ///
-    /// In the double-tap case, the Quiet time window defines the time after the first tap recognition in which there must
-    /// not be any overcoming threshold event. When latched mode is disabled (`LIR` bit of `TAP_CFG` is set to 0), the
-    /// Quiet time also defines the length of the interrupt pulse (in both single and double-tap case).[^note]
-    ///
-    /// The `QUIET[1:0]` bits of the `INT_DUR2` register are used to set the Quiet time window value:
-    /// the default value of these bits is `00b` and corresponds to `2/ODR_XL` time, where `ODR_XL` is the accelerometer output data rate.
-    /// If the `QUIET[1:0]` bits are set to a different value, 1 LSB corresponds to `4/ODR_XL` time.[^note]
-    ///
-    /// [^note]: Definition from the LSM6DSOX Application Note
-    fn set_tap_quiet(&mut self, quiet: u8) -> Result<(), Error>;
-
-    /// Sets the maximum duration of the over-threshold event. Default value: `0b00`
-    ///
-    /// The Shock time window defines the maximum duration of the overcoming threshold event: the acceleration must
-    /// return below the threshold before the Shock window has expired, otherwise the tap event is not detected. The
-    /// `SHOCK[1:0]` bits of the `INT_DUR2` register are used to set the Shock time window value: the default value of
-    /// these bits is 00b and corresponds to `4/ODR_XL` time, where `ODR_XL` is the accelerometer output data rate. If the
-    /// `SHOCK[1:0]` bits are set to a different value, 1 LSB corresponds to `8/ODR_XL` time.[^note]
-    ///
-    /// [^note]: Definition from the LSM6DSOX Application Note
-    fn set_tap_shock(&mut self, shock: u8) -> Result<(), Error>;
-}
-/// Trait to implement LSM6DSOX specific gyroscope functions.
-pub trait Lsm6dsoxGyroscope {
-    /// Sets the measurement output rate.
-    ///
-    /// Note: [DataRate::Freq1Hz6] is not supported by the gyroscope and will yield an [Error::InvalidData].
-    fn set_gyro_sample_rate(&mut self, odr: DataRate) -> Result<(), Error>;
-
-    /// Sets the gyroscope measurement range.
-    ///
-    /// Values up to this scale will be reported correctly.
-    fn set_gyro_scale(&mut self, scale: GyroscopeScale) -> Result<(), Error>;
-
-    /// Get a angular rate reading.
-    ///
-    /// If no data is ready returns the appropriate [Error].
-    fn angular_rate(&mut self) -> Result<AngularRate, Error>;
-
-    /// Get a *raw* angular rate reading.
-    ///
-    /// If no data is ready returns the appropriate [Error].
-    fn angular_rate_raw(&mut self) -> Result<RawAngularRate, Error>;
-}
 /// Representation of a LSM6DSOX. Stores the address and device peripherals.
 pub struct Lsm6dsox<I2C, Delay>
 where
@@ -228,12 +82,36 @@ where
     config: Configuration,
 }
 
-impl<I2C, Delay> Sensor for Lsm6dsox<I2C, Delay>
+impl<I2C, Delay> Lsm6dsox<I2C, Delay>
 where
     I2C: i2c::Write + i2c::WriteRead,
     Delay: DelayMs<u32>,
 {
-    fn check_id(&mut self) -> Result<u8, Option<u8>> {
+    /// Create a new instance of this sensor.
+    pub fn new(i2c: I2C, address: SlaveAddress, delay: Delay) -> Self {
+        Self {
+            i2c,
+            address,
+            delay,
+            config: Configuration {
+                xl_odr: DataRate::PowerDown,
+                xl_scale: AccelerometerScale::Accel2g,
+                g_odr: DataRate::PowerDown,
+                g_scale: GyroscopeScale::Dps250,
+            },
+        }
+    }
+
+    /// Destroy the sensor and return the hardware peripherals
+    pub fn destroy(self) -> (I2C, Delay) {
+        (self.i2c, self.delay)
+    }
+
+    /// Check whether the configured Sensor returns its correct id.
+    ///
+    /// Returns `Ok(id)` if `id` matches the Standard LSM6DSOX id,
+    /// `Err(Some(id))` or `Err(None)` if `id` doesn't match or couldn't be read.
+    pub fn check_id(&mut self) -> Result<u8, Option<u8>> {
         let mut buf = [0; 1];
 
         match self
@@ -251,8 +129,9 @@ where
         }
     }
 
-    // TODO Add fancy config structure
-    fn setup(&mut self) -> Result<(), Error> {
+    /// Initializes the sensor.
+    /// A software reset is performed and common settings are applied.
+    pub fn setup(&mut self) -> Result<(), Error> {
         self.update_reg_command(Command::SwReset)?;
 
         // Give it 5 tries
@@ -295,7 +174,10 @@ where
         }
     }
 
-    fn check_interrupt_sources(&mut self) -> Result<BitFlags<InterruptCause>, Error> {
+    /// Checks the interrupt status of all possible sources.
+    ///
+    /// The interrupt flags will be cleared after this check, or according to the LIR mode of the specific source.
+    pub fn check_interrupt_sources(&mut self) -> Result<BitFlags<InterruptCause>, Error> {
         let mut buf = 0;
         self.read_reg_byte(Register::ALL_INT_SRC, &mut buf)?;
         let flags = BitFlags::from_bits(buf).map_err(|_| Error::InvalidData)?;
@@ -303,7 +185,8 @@ where
         Ok(flags)
     }
 
-    fn power_down_mode(&mut self) -> core::result::Result<(), Error> {
+    /// Sets both Accelerometer and Gyroscope in power-down mode.
+    pub fn power_down_mode(&mut self) -> core::result::Result<(), Error> {
         self.update_reg_command(Command::SetDataRateXl(DataRate::PowerDown))?;
         self.config.xl_odr = DataRate::PowerDown;
 
@@ -312,7 +195,15 @@ where
 
         Ok(())
     }
-    fn map_interrupt(
+
+    /// Maps an available interrupt source to a available interrupt line.
+    ///
+    /// Toggles whether a interrupt source will generate interrupts on the specified line.
+    ///
+    /// Note: Interrupt sources [SHUB](InterruptSource::SHUB) and [Timestamp](InterruptSource::Timestamp) are not available on both [interrupt lines](InterruptLine).
+    ///
+    /// Interrupts need to be enabled globally for a mapping to take effect. See [`Lsm6dsox::enable_interrupts()`].
+    pub fn map_interrupt(
         &mut self,
         int_src: InterruptSource,
         int_line: InterruptLine,
@@ -328,7 +219,10 @@ where
         }
     }
 
-    fn enable_interrupts(&mut self, enabled: bool) -> Result<(), Error> {
+    /// Enable basic interrupts
+    ///
+    /// Enables/disables interrupts for 6D/4D, free-fall, wake-up, tap, inactivity.
+    pub fn enable_interrupts(&mut self, enabled: bool) -> Result<(), Error> {
         self.update_reg_command(Command::InterruptEnable(enabled))
     }
 }
@@ -338,26 +232,6 @@ where
     I2C: i2c::Write + i2c::WriteRead,
     Delay: DelayMs<u32>,
 {
-    /// Create a new instance of this sensor.
-    pub fn new(i2c: I2C, address: SlaveAddress, delay: Delay) -> Self {
-        Self {
-            i2c,
-            address,
-            delay,
-            config: Configuration {
-                xl_odr: DataRate::PowerDown,
-                xl_scale: AccelerometerScale::Accel2g,
-                g_odr: DataRate::PowerDown,
-                g_scale: GyroscopeScale::Dps250,
-            },
-        }
-    }
-
-    /// Destroy the sensor and return the hardware peripherals
-    pub fn destroy(self) -> (I2C, Delay) {
-        (self.i2c, self.delay)
-    }
-
     /// Updates the bits in register `reg` specified by `bitmask` with payload `data`.
     fn update_reg_bits(&mut self, reg: Register, data: u8, bitmask: u8) -> Result<(), Error> {
         // We have to do a read of the register first to keep the bits we don't want to touch.
