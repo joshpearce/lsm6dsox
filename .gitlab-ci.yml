@@ -1,0 +1,68 @@
+default:
+  tags:
+    - serum
+
+build:
+  stage: build
+  script:
+    - cargo build
+
+check-formatting:
+  stage: lint
+  script:
+    - cargo fmt -- --check
+
+clippy:
+  stage: lint
+  script:
+    - cargo clippy
+    - cargo clippy --message-format=json | gitlab-clippy > gl-code-quality-report.json
+  artifacts:
+    reports:
+      codequality: gl-code-quality-report.json
+
+cargo-udeps:
+  stage: lint
+  script:
+    - cargo +nightly udeps --workspace --all-targets --show-unused-transitive --all-features --backend save-analysis --output human --quiet
+  allow_failure: true
+
+test:
+  stage: test
+  script:
+    - cargo test -- --format json --report-time -Z unstable-options | tee results.json
+    - cat results.json | cargo2junit > results.xml
+    - cat results.xml
+    - cargo tarpaulin --out Xml
+  coverage: '/^\d+.\d+% coverage/'
+  artifacts:
+    reports:
+      junit:
+        - results.xml
+      coverage_report:
+        coverage_format: cobertura
+        path: cobertura.xml
+
+license-information:
+  stage: deploy
+  script:
+    - check-sele-licenses --check
+
+pages:
+  stage: deploy
+  #only:
+  #  - main
+  script:
+    - cargo doc --no-deps
+    - mv ./target/doc ./public
+    # Create a ./public/index.html which forwards from the Gitlab Pages main URL to the appropriate subdirectory
+    - echo '<!doctype html> <html lang="en"> <head> <meta charset="utf-8"> <meta http-equiv="refresh" content="0; url=./lsm6dsox/" /> </head> <body> <a href="./lsm6dsox/"> LSM6DSOX embedded-hal driver documentation </a> </body> </html>' > ./public/index.html
+  artifacts:
+    paths:
+      - public
+
+stages:
+  - build
+  - lint
+  - test
+  - deploy
