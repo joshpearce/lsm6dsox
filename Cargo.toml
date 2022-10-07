@@ -5,10 +5,15 @@ authors = [ "Fraunhofer IML Embedded Rust Group <embedded-rust@iml.fraunhofer.de
 edition = "2018"
 license-file = "LICENSE"
 
+[package.metadata.cargo-udeps.ignore]
+#normal = []
+development = ["embedded-hal-mock"] # embedded-hal-mock is only used in tests and cargo-udeps cannot detect it (yet)
+#build = []
+
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-log = "^0.4.13"
 embedded-hal = "^0.2.4"
 byteorder = { version = "^1.4.3", default-features = false }
 accelerometer = "^0.12.0"

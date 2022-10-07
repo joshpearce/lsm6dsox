@@ -21,6 +21,12 @@ clippy:
     reports:
       codequality: gl-code-quality-report.json
 
+cargo-udeps:
+  stage: lint
+  script:
+    - cargo +nightly udeps --workspace --all-targets --show-unused-transitive --all-features --backend save-analysis --output human --quiet
+  allow_failure: true
+
 test:
   stage: test
   script:
