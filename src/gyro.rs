@@ -38,20 +38,14 @@ where
     ///
     /// If no data is ready returns the appropriate [Error].
     pub fn angular_rate(&mut self) -> Result<AngularRate, Error> {
-        let mut data_rdy: u8 = 0;
-        self.read_reg_byte(Register::STATUS_REG, &mut data_rdy)?;
+        let data_rdy = self.registers.read_reg(PrimaryRegister::STATUS_REG)?;
         if (data_rdy & 0b0000_0010) == 0 {
             // bit 2 of STATUS_REG indicates if gyro data is available
             Err(Error::NoDataReady)
         } else {
             let mut data_raw: [u8; 6] = [0; 6]; // All 3 axes x, y, z i16 values, decoded little endian, 2nd Complement
-            self.i2c
-                .write_read(
-                    self.address as u8,
-                    &[Register::OUTX_L_G as u8],
-                    &mut data_raw,
-                )
-                .map_err(|_| Error::I2cReadError)?;
+            self.registers
+                .read_regs(PrimaryRegister::OUTX_L_G, &mut data_raw)?;
             let mut data: [f32; 3] = [0.0; 3];
             let factor = self.config.g_scale.to_factor();
             for i in 0..3 {
@@ -70,20 +64,14 @@ where
     ///
     /// If no data is ready returns the appropriate [Error].
     pub fn angular_rate_raw(&mut self) -> Result<RawAngularRate, Error> {
-        let mut data_rdy: u8 = 0;
-        self.read_reg_byte(Register::STATUS_REG, &mut data_rdy)?;
+        let data_rdy = self.registers.read_reg(PrimaryRegister::STATUS_REG)?;
         if (data_rdy & 0b0000_0010) == 0 {
             // bit 2 of STATUS_REG indicates if gyro data is available
             Err(Error::NoDataReady)
         } else {
             let mut data_raw: [u8; 6] = [0; 6]; // All 3 axes x, y, z i16 values, decoded little endian, 2nd Complement
-            self.i2c
-                .write_read(
-                    self.address as u8,
-                    &[Register::OUTX_L_G as u8],
-                    &mut data_raw,
-                )
-                .map_err(|_| Error::I2cReadError)?;
+            self.registers
+                .read_regs(PrimaryRegister::OUTX_L_G, &mut data_raw)?;
             let mut data: [i16; 3] = [0; 3];
             for i in 0..3 {
                 data[i] = LittleEndian::read_i16(&data_raw[i * 2..i * 2 + 2]);

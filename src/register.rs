@@ -3,20 +3,207 @@
 // Licensed under the Open Logistics License 1.0.
 // For details on the licensing terms, see the LICENSE file.
 
+//! Register definitions and register access
+
 use crate::types::*;
+
+use embedded_hal::blocking::i2c;
+
+pub struct RegisterAccess<I2C> {
+    i2c: I2C,
+    address: SlaveAddress,
+    /// Stores if the FUNC_CFG_ACCESS - which is used to switch between normal registers and
+    /// embedded functions registers - is currently configured to access the former or the latter
+    embedded_functions_registers_selected: bool,
+}
+
+/// Manages register access to [`Register`]s, i.e. to [`PrimaryRegister`]s and
+/// [`EmbeddedFunctionsRegister`]s
+///
+/// Since [`PrimaryRegister`]s and [`EmbeddedFunctionsRegister`]s are accessed on different
+/// register pages which are switched via the `FUNC_CFG_ACCESS` register, this type keeps track of
+/// which register page is currently selected. For each register access, the currently selected
+/// register page is switched by updating `FUNC_CFG_ACCESS` if required.
+///
+/// Methods suffixed with `reg_address` or `reg_addresses` (e.g.
+/// [`read_reg_addresses`](Self::read_reg_addresses)) directly access a register address without
+/// taking care of selecting the appropriate register page. This may be useful if low-level
+/// access is required, for example to give register access to an externally generated machine
+/// learning core configuration. Note, however, that even in these cases the currently selected
+/// register page is properly tracked because all register writes/updates are checked for
+/// changing the `FUNC_CFG_ACCESS` register.
+impl<I2C> RegisterAccess<I2C>
+where
+    I2C: i2c::Write + i2c::WriteRead,
+{
+    pub fn new(i2c: I2C, address: SlaveAddress) -> Self {
+        Self {
+            i2c,
+            address,
+            embedded_functions_registers_selected: false,
+        }
+    }
+
+    pub fn destroy(self) -> I2C {
+        self.i2c
+    }
+
+    /// Ensures that the right register page is selected in the FUNC_CFG_ACCESS register (which
+    /// switches between normal and embedded functions registers) to access the given register
+    /// afterwards. The register address for the subsequent register address is returned on
+    /// success.
+    fn select_register_page(&mut self, reg: impl Into<Register>) -> Result<u8, Error> {
+        match reg.into() {
+            Register::Primary(reg) => {
+                if self.embedded_functions_registers_selected {
+                    self.update_reg_address(PrimaryRegister::FUNC_CFG_ACCESS as u8, 0x00, 0x80)?;
+                    self.embedded_functions_registers_selected = false;
+                }
+                Ok(reg as u8)
+            }
+            Register::EmbeddedFunctions(reg) => {
+                if !self.embedded_functions_registers_selected {
+                    self.update_reg_address(PrimaryRegister::FUNC_CFG_ACCESS as u8, 0x80, 0x80)?;
+                    self.embedded_functions_registers_selected = true;
+                }
+                Ok(reg as u8)
+            }
+        }
+    }
+
+    fn check_register_page_change(&mut self, reg_address: u8, value: u8) {
+        if reg_address == PrimaryRegister::FUNC_CFG_ACCESS as u8 {
+            self.embedded_functions_registers_selected = value & 0x80 != 0;
+        }
+    }
+
+    pub fn read_reg(&mut self, reg: impl Into<Register>) -> Result<u8, Error> {
+        let reg_address = self.select_register_page(reg)?;
+        let mut tbuf = [1; 1];
+        self.read_reg_addresses(reg_address, &mut tbuf)?;
+        Ok(tbuf[0])
+    }
+
+    pub fn read_regs(&mut self, reg: impl Into<Register>, buf: &mut [u8]) -> Result<(), Error> {
+        let reg_address = self.select_register_page(reg)?;
+        self.read_reg_addresses(reg_address, buf)
+    }
+
+    /// Directly read from register address
+    ///
+    /// This method does not take care of handling the `FUNC_CFG_ACCESS` register. Use
+    /// [`read_reg`](Self::read_reg) or [`read_regs`](Self::read_regs) instead if reasonable.
+    ///
+    /// For example, using this method directly may be useful when interfacing with C example code.
+    pub fn read_reg_addresses(&mut self, reg_address: u8, buf: &mut [u8]) -> Result<(), Error> {
+        self.i2c
+            .write_read(self.address as u8, &[reg_address], buf)
+            .map_err(|_| Error::I2cReadError)?;
+        Ok(())
+    }
+
+    pub fn write_reg(&mut self, reg: impl Into<Register>, data: u8) -> Result<(), Error> {
+        let reg_address = self.select_register_page(reg)?;
+        let update = [reg_address, data];
+        self.check_register_page_change(reg_address, data);
+        self.i2c
+            .write(self.address as u8, &update)
+            .map_err(|_| Error::I2cWriteError)
+    }
+
+    pub fn write_regs(&mut self, reg: impl Into<Register>, data: &[u8]) -> Result<(), Error> {
+        let reg_address = self.select_register_page(reg)?;
+        self.write_reg_addresses(reg_address, data)
+    }
+
+    /// Directly write to register address
+    ///
+    /// See documentation for [`read_reg_addressess`](Self::read_reg_addresses).
+    pub fn write_reg_addresses(&mut self, reg_address: u8, data: &[u8]) -> Result<(), Error> {
+        // We can address at most 128 registers (7 bit)
+        if data.len() > 128 {
+            return Err(Error::InvalidData);
+        }
+        let mut update = [0; 129];
+        update[0] = reg_address;
+        for (i, byte) in data.iter().enumerate() {
+            update[1 + i] = *byte;
+            // Checking each byte may be inefficient, but it is definitely simple and probably
+            // correct
+            self.check_register_page_change(reg_address + i as u8, *byte);
+        }
+        self.i2c
+            .write(self.address as u8, &update[..data.len() + 1])
+            .map_err(|_| Error::I2cWriteError)
+    }
+
+    /// Updates the bits in register `reg` specified by `bitmask` with payload `data`.
+    pub fn update_reg(
+        &mut self,
+        reg: impl Into<Register>,
+        data: u8,
+        bitmask: u8,
+    ) -> Result<(), Error> {
+        let reg_address = self.select_register_page(reg)?;
+        self.update_reg_address(reg_address, data, bitmask)
+    }
+
+    /// Directly updates the bits at the given register address
+    ///
+    /// See documentation for [`read_reg_addresses`](Self::read_reg_addresses).
+    pub fn update_reg_address(
+        &mut self,
+        reg_address: u8,
+        data: u8,
+        bitmask: u8,
+    ) -> Result<(), Error> {
+        // We have to do a read of the register first to keep the bits we don't want to touch.
+        let mut buf = [0; 1];
+        self.read_reg_addresses(reg_address, &mut buf)?;
+        let mut val = buf[0];
+
+        // First set `bitmask` bits to zero,
+        val &= !bitmask;
+        // then write our data to these bits.
+        val |= data & bitmask;
+
+        // A write takes the register address as first byte, the data as second.
+        let update = [reg_address, val];
+        self.check_register_page_change(reg_address, val);
+        self.i2c
+            .write(self.address as u8, &update)
+            .map_err(|_| Error::I2cWriteError)
+    }
+}
+
+/// All registers which are accessible from the primary SPI/I2C/MIPI I3C interfaces. These consist
+/// of the union of the normal configuration registers (see [`PrimaryRegister`]) and the
+/// [`EmbeddedFunctionsRegister`]s.
+#[derive(Clone, Copy)]
+pub enum Register {
+    Primary(PrimaryRegister),
+    EmbeddedFunctions(EmbeddedFunctionsRegister),
+}
+
+impl From<PrimaryRegister> for Register {
+    fn from(reg: PrimaryRegister) -> Self {
+        Register::Primary(reg)
+    }
+}
+
+impl From<EmbeddedFunctionsRegister> for Register {
+    fn from(reg: EmbeddedFunctionsRegister) -> Self {
+        Register::EmbeddedFunctions(reg)
+    }
+}
 
 /// Registers which are accessible from the primary SPI/I2C/MIPI I3C interfaces.
 ///
 /// **Note:** These Register names correspond to the normal function registers.
 /// When embedded function access is enabled in `FUNC_CFG_ACCESS` these addresses correspond to different registers.
 #[allow(non_camel_case_types)]
-#[allow(dead_code)]
 #[derive(Clone, Copy)]
-pub(crate) enum Register {
-    I2C_ADD_L = 0xD5,
-    I2C_ADD_H = 0xD7,
-    ID = 0x6C,
-
+pub enum PrimaryRegister {
     FUNC_CFG_ACCESS = 0x01,
     PIN_CTRL = 0x02,
     S4S_TPH_L = 0x04,
@@ -114,6 +301,67 @@ pub(crate) enum Register {
     FIFO_DATA_OUT_Z_H = 0x7E,
 }
 
+/// Embedded Functions Registers
+#[allow(non_camel_case_types)]
+#[derive(Clone, Copy)]
+pub enum EmbeddedFunctionsRegister {
+    PAGE_SEL = 0x02,
+    EMB_FUNC_EN_A = 0x04,
+    EMB_FUNC_EN_B = 0x05,
+    PAGE_ADDRESS = 0x08,
+    PAGE_VALUE = 0x09,
+    EMB_FUNC_INT1 = 0x0A,
+    FSM_INT1_A = 0x0B,
+    FSM_INT1_B = 0x0C,
+    MLC_INT1 = 0x0D,
+    EMB_FUNC_INT2 = 0x0E,
+    FSM_INT2_A = 0x0F,
+    FSM_INT2_B = 0x10,
+    MLC_INT2 = 0x11,
+    EMB_FUNC_STATUS = 0x12,
+    FSM_STATUS_A = 0x13,
+    FSM_STATUS_B = 0x14,
+    MLC_STATUS = 0x15,
+    PAGE_RW = 0x17,
+    EMB_FUNC_FIFO_CFG = 0x44,
+    FSM_ENABLE_A = 0x46,
+    FSM_ENABLE_B = 0x47,
+    FSM_LONG_COUNTER_L = 0x48,
+    FSM_LONG_COUNTER_H = 0x49,
+    FSM_LONG_COUNTER_CLEAR = 0x4A,
+    FSM_OUTS1 = 0x4C,
+    FSM_OUTS2 = 0x4D,
+    FSM_OUTS3 = 0x4E,
+    FSM_OUTS4 = 0x4F,
+    FSM_OUTS5 = 0x50,
+    FSM_OUTS6 = 0x51,
+    FSM_OUTS7 = 0x52,
+    FSM_OUTS8 = 0x53,
+    FSM_OUTS9 = 0x54,
+    FSM_OUTS10 = 0x55,
+    FSM_OUTS11 = 0x56,
+    FSM_OUTS12 = 0x57,
+    FSM_OUTS13 = 0x58,
+    FSM_OUTS14 = 0x59,
+    FSM_OUTS15 = 0x5A,
+    FSM_OUTS16 = 0x5B,
+    EMB_FUNC_ODR_CFG_B = 0x5F,
+    EMB_FUNC_ODR_CFG_C = 0x60,
+    STEP_COUNTER_L = 0x62,
+    STEP_COUNTER_H = 0x63,
+    EMB_FUNC_SRC = 0x64,
+    EMB_FUNC_INIT_A = 0x66,
+    EMB_FUNC_INIT_B = 0x67,
+    MLC0_SRC = 0x70,
+    MLC1_SRC = 0x71,
+    MLC2_SRC = 0x72,
+    MLC3_SRC = 0x73,
+    MLC4_SRC = 0x74,
+    MLC5_SRC = 0x75,
+    MLC6_SRC = 0x76,
+    MLC7_SRC = 0x77,
+}
+
 /// Commands Enum to specify Command structures
 /// which set various register bits of the lsm.
 ///
@@ -142,24 +390,24 @@ pub(crate) enum Command {
 
 impl Command {
     /// Returns the register address to write to for the specific command.
-    pub(crate) fn register(&self) -> Register {
+    pub(crate) fn register(&self) -> PrimaryRegister {
         match *self {
-            Command::SwReset => Register::CTRL3_C,
-            Command::SetDataRateXl(_) => Register::CTRL1_XL,
-            Command::SetAccelScale(_) => Register::CTRL1_XL,
-            Command::TapEnable(_) => Register::TAP_CFG0,
-            Command::TapThreshold(Axis::X, _) => Register::TAP_CFG1,
-            Command::TapThreshold(Axis::Y, _) => Register::TAP_CFG2,
-            Command::TapThreshold(Axis::Z, _) => Register::TAP_THS_6D,
-            Command::TapDuration(_) => Register::INT_DUR2,
-            Command::TapQuiet(_) => Register::INT_DUR2,
-            Command::TapShock(_) => Register::INT_DUR2,
-            Command::TapMode(_) => Register::WAKE_UP_THS,
-            Command::InterruptEnable(_) => Register::TAP_CFG2,
-            Command::MapInterrupt(InterruptLine::INT1, _, _) => Register::MD1_CFG,
-            Command::MapInterrupt(InterruptLine::INT2, _, _) => Register::MD2_CFG,
-            Command::SetDataRateG(_) => Register::CTRL2_G,
-            Command::SetGyroScale(_) => Register::CTRL2_G,
+            Command::SwReset => PrimaryRegister::CTRL3_C,
+            Command::SetDataRateXl(_) => PrimaryRegister::CTRL1_XL,
+            Command::SetAccelScale(_) => PrimaryRegister::CTRL1_XL,
+            Command::TapEnable(_) => PrimaryRegister::TAP_CFG0,
+            Command::TapThreshold(Axis::X, _) => PrimaryRegister::TAP_CFG1,
+            Command::TapThreshold(Axis::Y, _) => PrimaryRegister::TAP_CFG2,
+            Command::TapThreshold(Axis::Z, _) => PrimaryRegister::TAP_THS_6D,
+            Command::TapDuration(_) => PrimaryRegister::INT_DUR2,
+            Command::TapQuiet(_) => PrimaryRegister::INT_DUR2,
+            Command::TapShock(_) => PrimaryRegister::INT_DUR2,
+            Command::TapMode(_) => PrimaryRegister::WAKE_UP_THS,
+            Command::InterruptEnable(_) => PrimaryRegister::TAP_CFG2,
+            Command::MapInterrupt(InterruptLine::INT1, _, _) => PrimaryRegister::MD1_CFG,
+            Command::MapInterrupt(InterruptLine::INT2, _, _) => PrimaryRegister::MD2_CFG,
+            Command::SetDataRateG(_) => PrimaryRegister::CTRL2_G,
+            Command::SetGyroScale(_) => PrimaryRegister::CTRL2_G,
         }
     }
     /// Returns a byte containing data to be written by the command.

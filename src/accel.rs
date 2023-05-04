@@ -19,8 +19,7 @@ where
     ) -> Result<accelerometer::vector::F32x3, accelerometer::Error<Self::Error>> {
         // First read the status register to determine if data is available,
         // if so, read the six bytes of data and convert it.
-        let mut data_rdy: u8 = 0;
-        self.read_reg_byte(Register::STATUS_REG, &mut data_rdy)?;
+        let data_rdy = self.registers.read_reg(PrimaryRegister::STATUS_REG)?;
         if (data_rdy & 0b0000_0001) == 0 {
             // check if XLDA bit is set in STATUS_REG
             Err(accelerometer::Error::new_with_cause(
@@ -29,13 +28,8 @@ where
             ))
         } else {
             let mut data_raw: [u8; 6] = [0; 6]; // All 3 axes x, y, z i16 values, decoded little endian, 2nd Complement
-            self.i2c
-                .write_read(
-                    self.address as u8,
-                    &[Register::OUTX_L_A as u8],
-                    &mut data_raw,
-                )
-                .map_err(|_| Error::I2cReadError)?;
+            self.registers
+                .read_regs(PrimaryRegister::OUTX_L_A, &mut data_raw)?;
             let mut data: [f32; 3] = [0.0; 3];
             let factor = self.config.xl_scale.to_factor();
             // Now convert the raw i16 values to f32 engineering units
@@ -52,12 +46,8 @@ where
         // Since the user shouldn't have to update the config manually,
         // this is done here in case the config differs from the device state (which it shouldn't, but who knows).
         // It may be better to only query the config here if this function is called often.
-        let mut buf = [0; 1];
-        self.i2c
-            .write_read(self.address as u8, &[Register::CTRL1_XL as u8], &mut buf)
-            .map_err(|_| Error::I2cReadError)?;
-
-        let sample_rate = DataRate::try_from(buf[0] & 0xF0)
+        let sample_rate_raw = self.registers.read_reg(PrimaryRegister::CTRL1_XL)?;
+        let sample_rate = DataRate::try_from(sample_rate_raw & 0xF0)
             .map_err(|_| accelerometer::Error::new(accelerometer::ErrorKind::Device))?;
         self.config.xl_odr = sample_rate;
         Ok(sample_rate.into())
@@ -76,8 +66,7 @@ where
     ) -> Result<accelerometer::vector::I16x3, accelerometer::Error<Self::Error>> {
         // First read the status register to determine if data is available,
         // if so, read the six bytes of data and convert it.
-        let mut data_rdy: u8 = 0;
-        self.read_reg_byte(Register::STATUS_REG, &mut data_rdy)?;
+        let data_rdy = self.registers.read_reg(PrimaryRegister::STATUS_REG)?;
         if (data_rdy & 0b0000_0001) == 0 {
             // check if XLDA bit is set in STATUS_REG
             Err(accelerometer::Error::new_with_cause(
@@ -86,13 +75,8 @@ where
             ))
         } else {
             let mut data_raw: [u8; 6] = [0; 6]; // All 3 axes x, y, z i16 values, decoded little endian, 2nd Complement
-            self.i2c
-                .write_read(
-                    self.address as u8,
-                    &[Register::OUTX_L_A as u8],
-                    &mut data_raw,
-                )
-                .map_err(|_| Error::I2cReadError)?;
+            self.registers
+                .read_regs(PrimaryRegister::OUTX_L_A, &mut data_raw)?;
             let mut data: [i16; 3] = [0; 3];
             // Now convert the raw i16 values to f32 engineering units
             for i in 0..3 {
@@ -147,8 +131,10 @@ where
         Set XL_ULP_EN = 1 and XL_HM_MODE = 0 = high-performance mode
         Refer to application note table 8 and 9 for further information on operating modes.
         */
-        self.update_reg_bits(Register::CTRL5_C, 0b1000_0000, 0b1000_0000)?;
-        self.update_reg_bits(Register::CTRL6_C, 0b0000_0000, 0b0000_0000)?;
+        self.registers
+            .update_reg(PrimaryRegister::CTRL5_C, 0b1000_0000, 0b1000_0000)?;
+        self.registers
+            .update_reg(PrimaryRegister::CTRL6_C, 0b0000_0000, 0b0000_0000)?;
 
         /* Enable tap detection */
         self.update_reg_command(Command::TapEnable(tap_cfg))?;
@@ -187,8 +173,7 @@ where
     /// - The interrupt flag will be cleared after this check, or according to the LIR mode.
     /// - If LIR is set to `False` the interrupt will be set for the quiet-time window and clears automatically after that.
     pub fn check_tap(&mut self) -> Result<BitFlags<TapSource>, Error> {
-        let mut buf = 0;
-        self.read_reg_byte(Register::TAP_SRC, &mut buf)?;
+        let buf = self.registers.read_reg(PrimaryRegister::TAP_SRC)?;
 
         BitFlags::from_bits(buf).map_err(|_| Error::InvalidData)
     }
