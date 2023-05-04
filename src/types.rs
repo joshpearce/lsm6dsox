@@ -102,9 +102,15 @@ pub enum SlaveAddress {
 pub(crate) struct Configuration {
     // Would it be better to use Option types here
     // to be able to have uninitialized config fields?
+    /// Accelerometer sampling rate or [`DataRate::PowerDown`]
     pub xl_odr: DataRate,
+    /// Accelerometer maximum output range
     pub xl_scale: AccelerometerScale,
+    /// Gyroscope sampling rate or [`DataRate::PowerDown`]
+    ///
+    /// Make sure not to use [`DataRate::Freq1Hz6`] here which is invalid for the gyroscope.
     pub g_odr: DataRate,
+    /// Gyroscope maximum output range
     pub g_scale: GyroscopeScale,
 }
 
