@@ -16,6 +16,13 @@ Platform-agnostic embedded-hal driver for the ST LSM6DSOX iNEMO inertial module.
 - Interrupts
 - Further features may be added in the future
 
-## Contacts
+## License
+
+Open Logistics Foundation License\
+Version 1.3, January 2023
+
+See the LICENSE file in the top-level directory.
+
+## Contact
 
 Fraunhofer IML Embedded Rust Group - <embedded-rust@iml.fraunhofer.de>
