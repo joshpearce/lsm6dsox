@@ -2,16 +2,26 @@
 name = "lsm6dsox"
 version = "1.0.1"
 description = "Platform-agnostic embedded-hal driver for the ST LSM6DSOX iNEMO inertial module"
-authors = [ "Fraunhofer IML Embedded Rust Group <embedded-rust@iml.fraunhofer.de>" ]
+authors = [
+  "Fraunhofer IML Embedded Rust Group <embedded-rust@iml.fraunhofer.de>",
+]
 edition = "2018"
 license = "OLFL-1.3"
 repository = "https://git.openlogisticsfoundation.org/silicon-economy/libraries/serum/lsm6dsox"
 categories = ["embedded", "no-std", "no-std::no-alloc"]
-keywords = ["no_std", "sensor",  "mems", "magnetometer", "accelerometer", "embedded-hal-driver"]
+keywords = [
+  "no_std",
+  "sensor",
+  "magnetometer",
+  "accelerometer",
+  "embedded-hal-driver",
+]
 
 [package.metadata.cargo-udeps.ignore]
 #normal = []
-development = ["embedded-hal-mock"] # embedded-hal-mock is only used in tests and cargo-udeps cannot detect it (yet)
+development = [
+  "embedded-hal-mock",
+] # embedded-hal-mock is only used in tests and cargo-udeps cannot detect it (yet)
 #build = []
 
 
