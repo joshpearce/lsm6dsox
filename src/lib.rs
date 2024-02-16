@@ -15,7 +15,7 @@
 //!
 //!
 //!
-//! ## Resources
+//! # Resources
 //!
 //! [Datasheet](https://www.st.com/resource/en/datasheet/lsm6dsox.pdf)
 //!
@@ -25,6 +25,15 @@
 //! For application hints please also refer to the
 //! [application note](https://www.st.com/resource/en/application_note/an5272-lsm6dsox-alwayson-3d-accelerometer-and-3d-gyroscope-stmicroelectronics.pdf)
 //! provided by ST.
+//!
+//! # Features
+//!
+//! - [`Accelerometer`](https://docs.rs/accelerometer/latest/accelerometer/trait.Accelerometer.html) trait implementation
+//! - [`embedded-hal`](https://crates.io/crates/embedded-hal) I²C support
+//! - Gyroscope
+//! - Tap recognition
+//! - Interrupts
+//! - Further features may be added in the future
 //!
 //! # Examples
 //! ```no_run
@@ -53,6 +62,16 @@
 //! # Ok(())
 //! # }
 //! ```
+//! # License
+//!
+//! Open Logistics Foundation License\
+//! Version 1.3, January 2023
+//!
+//! See the LICENSE file in the top-level directory.
+//!
+//! # Contact
+//!
+//! Fraunhofer IML Embedded Rust Group - <embedded-rust@iml.fraunhofer.de>
 
 mod accel;
 mod gyro;

@@ -1,22 +1,40 @@
 default:
   tags:
-    - serum
+    - nix
 
 build:
   stage: build
   script:
-    - cargo build
+    - nix-shell --pure --run "cargo build"
 
 check-formatting:
   stage: lint
   script:
-    - cargo fmt -- --check
+    - nix-shell --pure --run "cargo fmt -- --check"
+
+cargo-readme:
+  stage: lint
+  script:
+    - nix-shell --pure --run "diff README.md <(cargo readme --no-license)"
+
+spellcheck:
+  stage: lint
+  needs: []
+  script:
+    - git clone https://git.openlogisticsfoundation.org/silicon-economy/libraries/serum/serum-tool-configs.git
+    # find recursively lists all Rust, Markdown, Toml and memory.x files
+    # grep -v removes everything that contains the target, doc or lib directory
+    # xargs appends the remaining files as arguments to the cspell call
+    - nix-shell --pure --run '(find . -name "*.rs" -or -name "*.md" -or -name "*.toml" -or -name "*.x" | grep -v \/target\/ | grep -v \/doc\/ | grep -v \/lib\/) | xargs cspell lint --relative --gitignore --show-suggestions --dot --config "./serum-tool-configs/cspell.json"'
+    - rm -rf serum-tool-configs
+  allow_failure: true
 
 clippy:
   stage: lint
   script:
-    - cargo clippy
-    - cargo clippy --message-format=json | gitlab-clippy > gl-code-quality-report.json
+    - nix-shell --pure --run "cargo clippy --examples"
+    - nix-shell --pure --run "cargo clippy"
+    - nix-shell --pure --run "cargo clippy --message-format=json | gitlab-clippy > gl-code-quality-report.json"
   artifacts:
     reports:
       codequality: gl-code-quality-report.json
@@ -24,16 +42,24 @@ clippy:
 cargo-udeps:
   stage: lint
   script:
-    - cargo +nightly udeps --workspace --all-targets --show-unused-transitive --all-features --backend save-analysis --output human --quiet
+    - nix-shell --pure --arg nightly true --run "cargo udeps --workspace --all-targets --show-unused-transitive --all-features --output human --quiet"
   allow_failure: true
+
+check-licenses:
+  stage: lint
+  script:
+    - git clone https://git.openlogisticsfoundation.org/silicon-economy/libraries/serum/serum-tool-configs.git
+    - nix-shell --pure --run "cargo-deny check licenses --config serum-tool-configs/deny.toml --allow license-not-encountered"
+    - rm -rf serum-tool-configs
 
 test:
   stage: test
   script:
-    - cargo test -- --format json --report-time -Z unstable-options | tee results.json
-    - cat results.json | cargo2junit > results.xml
+    - nix-shell --pure --run "cargo test --examples"
+    - nix-shell --pure --arg nightly true --run "cargo test -- --format json --report-time -Z unstable-options | tee results.json"
+    - nix-shell --pure --run "cat results.json | cargo2junit > results.xml"
     - cat results.xml
-    - cargo tarpaulin --out Xml
+    - nix-shell --pure --run "cargo tarpaulin --out Xml"
   coverage: '/^\d+.\d+% coverage/'
   artifacts:
     reports:
@@ -46,17 +72,19 @@ test:
 license-information:
   stage: deploy
   script:
-    - check-sele-licenses --check
+    - git clone https://git.openlogisticsfoundation.org/silicon-economy/libraries/serum/serum-tool-configs.git
+    - nix-shell --pure --run "cargo-deny list --config serum-tool-configs/deny.toml"
+    - rm -rf serum-tool-configs
 
 pages:
   stage: deploy
-  #only:
-  #  - main
+  only:
+    - master
   script:
-    - cargo doc --no-deps
+    - nix-shell --pure --run "cargo doc --no-deps"
     - mv ./target/doc ./public
     # Create a ./public/index.html which forwards from the Gitlab Pages main URL to the appropriate subdirectory
-    - echo '<!doctype html> <html lang="en"> <head> <meta charset="utf-8"> <meta http-equiv="refresh" content="0; url=./lsm6dsox/" /> </head> <body> <a href="./lsm6dsox/"> LSM6DSOX embedded-hal driver documentation </a> </body> </html>' > ./public/index.html
+    - echo '<!doctype html> <html lang="en"> <head> <meta charset="utf-8"> <meta http-equiv="refresh" content="0; url=./lsm6dsox/" /> </head> <body> <a href="./lsm6dsox/"> LSM6DSOX Driver Documentation </a> </body> </html>' > ./public/index.html
   artifacts:
     paths:
       - public
