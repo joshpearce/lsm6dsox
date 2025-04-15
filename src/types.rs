@@ -8,20 +8,57 @@
 //!
 //! Structs and Enums representing the sensors configuration, readings and states.
 
+use core::fmt::Display;
+
+use embedded_hal::i2c::Error as I2cError;
 use enumflags2::bitflags;
 use measurements::AngularVelocity;
 use num_enum::TryFromPrimitive;
 
 /// Lsm6dsox errors
 #[derive(Clone, Copy, Debug)]
-pub enum Error {
-    I2cWriteError,
-    I2cReadError,
+pub enum Error<S: I2cError> {
+    /// An error occured during a I2C write operation
+    I2cWriteError(S),
+    /// An error occured during a I2C read operation
+    I2cReadError(S),
+    /// Reset of the LSM6DSOX failed
     ResetFailed,
+    /// No data was ready to be read
     NoDataReady,
+    /// Invalid or unexpected data was read
     InvalidData,
+    /// A parameter was incorrect
+    InvalidInput,
+    /// Operation or configuration not supported
     NotSupported,
 }
+impl<S: I2cError> Error<S> {
+    // TODO use core::error::Error::source to return a i2c::ErrorKind, once it implements Error
+    //      (probably when embedded-hal 1.1.0 is released, a corresponding MR was already accepted)
+    pub fn source(&self) -> Option<&S> {
+        match self {
+            Error::I2cWriteError(e) => Some(e),
+            Error::I2cReadError(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+impl<S: I2cError> Display for Error<S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Error::I2cWriteError(e) => write!(f, "i2c write error: {e:#?}"),
+            Error::I2cReadError(e) => write!(f, "i2c read error: {e:#?}"),
+            Error::ResetFailed => write!(f, "reset failed"),
+            Error::NoDataReady => write!(f, "no data ready"),
+            Error::InvalidData => write!(f, "invalid data"),
+            Error::NotSupported => write!(f, "operation not supported"),
+            Error::InvalidInput => write!(f, "invalid input parameter"),
+        }
+    }
+}
+impl<S: I2cError> core::error::Error for Error<S> {}
+
 /// Angular rate measurement result
 ///
 /// Holds three [AngularVelocity] measurements.

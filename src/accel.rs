@@ -10,10 +10,10 @@ use super::*;
 
 impl<I2C, Delay> Accelerometer for Lsm6dsox<I2C, Delay>
 where
-    I2C: i2c::Write + i2c::WriteRead,
-    Delay: DelayMs<u32>,
+    I2C: I2c,
+    Delay: DelayNs,
 {
-    type Error = Error;
+    type Error = Error<I2C::Error>;
 
     fn accel_norm(
         &mut self,
@@ -57,10 +57,10 @@ where
 
 impl<I2C, Delay> RawAccelerometer<I16x3> for Lsm6dsox<I2C, Delay>
 where
-    I2C: i2c::Write + i2c::WriteRead,
-    Delay: DelayMs<u32>,
+    I2C: I2c,
+    Delay: DelayNs,
 {
-    type Error = Error;
+    type Error = Error<I2C::Error>;
 
     fn accel_raw(
         &mut self,
@@ -91,11 +91,11 @@ where
 
 impl<I2C, Delay> Lsm6dsox<I2C, Delay>
 where
-    I2C: i2c::Write + i2c::WriteRead,
-    Delay: DelayMs<u32>,
+    I2C: I2c,
+    Delay: DelayNs,
 {
     /// Sets the measurement output rate.
-    pub fn set_accel_sample_rate(&mut self, data_rate: DataRate) -> Result<(), Error> {
+    pub fn set_accel_sample_rate(&mut self, data_rate: DataRate) -> Result<(), Error<I2C::Error>> {
         self.update_reg_command(Command::SetDataRateXl(data_rate))?;
         self.config.xl_odr = data_rate;
         Ok(())
@@ -104,7 +104,7 @@ where
     /// Sets the acceleration measurement range.
     ///
     /// Values up to this scale will be reported correctly.
-    pub fn set_accel_scale(&mut self, scale: AccelerometerScale) -> Result<(), Error> {
+    pub fn set_accel_scale(&mut self, scale: AccelerometerScale) -> Result<(), Error<I2C::Error>> {
         self.update_reg_command(Command::SetAccelScale(scale))?;
         self.config.xl_scale = scale;
         Ok(())
@@ -120,7 +120,7 @@ where
         tap_cfg: TapCfg,
         tap_mode: TapMode,
         int_line: Option<InterruptLine>,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Error<I2C::Error>> {
         /* Set Output Data Rate */
         self.update_reg_command(Command::SetDataRateXl(DataRate::Freq104Hz))?;
         // Output data rate and full scale could be set with one register update, maybe change this
@@ -173,7 +173,7 @@ where
     /// - The Register will be cleared according to the LIR setting.
     /// - The interrupt flag will be cleared after this check, or according to the LIR mode.
     /// - If LIR is set to `False` the interrupt will be set for the quiet-time window and clears automatically after that.
-    pub fn check_tap(&mut self) -> Result<BitFlags<TapSource>, Error> {
+    pub fn check_tap(&mut self) -> Result<BitFlags<TapSource>, Error<I2C::Error>> {
         let buf = self.registers.read_reg(PrimaryRegister::TAP_SRC)?;
 
         BitFlags::from_bits(buf).map_err(|_| Error::InvalidData)
@@ -186,7 +186,7 @@ where
     /// full scale: 1 LSB = (FS_XL)/(2⁵). The unsigned threshold is applied to both positive and negative slope data.[^note]
     ///
     /// [^note]: Definition from the LSM6DSOX Application Note
-    pub fn set_tap_threshold(&mut self, x: u8, y: u8, z: u8) -> Result<(), Error> {
+    pub fn set_tap_threshold(&mut self, x: u8, y: u8, z: u8) -> Result<(), Error<I2C::Error>> {
         self.update_reg_command(Command::TapThreshold(Axis::X, x))?;
         self.update_reg_command(Command::TapThreshold(Axis::Y, y))?;
         self.update_reg_command(Command::TapThreshold(Axis::Z, z))
@@ -201,7 +201,7 @@ where
     /// are set to a different value, 1 LSB corresponds to `32/ODR_XL` time.[^note]
     ///
     /// [^note]: Definition from the LSM6DSOX Application Note
-    pub fn set_tap_duration(&mut self, dur: u8) -> Result<(), Error> {
+    pub fn set_tap_duration(&mut self, dur: u8) -> Result<(), Error<I2C::Error>> {
         self.update_reg_command(Command::TapDuration(dur))
     }
 
@@ -216,7 +216,7 @@ where
     /// If the `QUIET[1:0]` bits are set to a different value, 1 LSB corresponds to `4/ODR_XL` time.[^note]
     ///
     /// [^note]: Definition from the LSM6DSOX Application Note
-    pub fn set_tap_quiet(&mut self, quiet: u8) -> Result<(), Error> {
+    pub fn set_tap_quiet(&mut self, quiet: u8) -> Result<(), Error<I2C::Error>> {
         self.update_reg_command(Command::TapQuiet(quiet))
     }
 
@@ -229,7 +229,7 @@ where
     /// `SHOCK[1:0]` bits are set to a different value, 1 LSB corresponds to `8/ODR_XL` time.[^note]
     ///
     /// [^note]: Definition from the LSM6DSOX Application Note
-    pub fn set_tap_shock(&mut self, shock: u8) -> Result<(), Error> {
+    pub fn set_tap_shock(&mut self, shock: u8) -> Result<(), Error<I2C::Error>> {
         self.update_reg_command(Command::TapShock(shock))
     }
 }
