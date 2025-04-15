@@ -1,18 +1,18 @@
 { nightly ? false }:
 let
   nixpkgsBase = import (fetchTarball {
-    name = "nixpkgs-stable-23.11";
-    url = "https://github.com/NixOS/nixpkgs/archive/refs/tags/23.11.tar.gz";
-    sha256 = "1ndiv385w1qyb3b18vw13991fzb9wg4cl21wglk89grsfsnra41k";
+    name = "nixpkgs-stable-24.05";
+    url = "https://github.com/NixOS/nixpkgs/archive/refs/tags/24.05.tar.gz";
+    sha256 = "1lr1h35prqkd1mkmzriwlpvxcb34kmhc9dnr48gkm8hh089hifmx";
   });
 
   # Oxalica's Rust overlay gives us the rust-bin function which allows us
   # to select a specific Rust toolchain. Furthermore, we can configure
   # additional targets like shown below.
   rustOverlay = import (builtins.fetchTarball {
-    name = "rust-overlay-2024-01-15";
-    url = "https://github.com/oxalica/rust-overlay/archive/d681ac8a92a1cce066df1d3a5a7f7c909688f4be.tar.gz";
-    sha256 = "1mrcbw14dlch89hnncs7pnm7lh4isqx7xywha6i97d8xs24spfvv";
+    name = "rust-overlay-2024-10-08";
+    url = "https://github.com/oxalica/rust-overlay/archive/d216ade5a0091ce60076bf1f8bc816433a1fc5da.tar.gz";
+    sha256 = "1cjmalanpbjf2zny100yjxslcpg6pfm5b6ih5gbv4ksiska9mr5g";
   });
 
   nixpkgs = nixpkgsBase {
@@ -23,9 +23,9 @@ let
   # For nightly, we use a specific one so we do not download a new compiler every day
   rustChannel = (
     if nightly
-    then nixpkgs.rust-bin.nightly."2024-01-14"
+    then nixpkgs.rust-bin.nightly."2024-10-08"
     # Stable Version of current nixpkgs
-    else nixpkgs.rust-bin.stable."1.73.0"
+    else nixpkgs.rust-bin.stable."1.81.0"
   ).default;
 
   # cargo-udeps only runs on nightly so we only need to include it if on nightly

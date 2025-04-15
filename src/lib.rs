@@ -39,18 +39,18 @@
 //! ```no_run
 //! # extern crate embedded_hal;
 //! # extern crate embedded_hal_mock;
-//! # use embedded_hal::prelude::*;
-//! # use embedded_hal_mock::i2c::{Mock as I2cMock, Transaction as I2cTransaction};
-//! # use embedded_hal_mock::delay::MockNoop;
+//! # use embedded_hal_mock::eh1::i2c::{Mock as I2cMock, Transaction as I2cTransaction};
+//! # use embedded_hal_mock::eh1::delay::NoopDelay;
+//! # type I2cError = <embedded_hal_mock::common::Generic<embedded_hal_mock::eh1::i2c::Transaction> as embedded_hal::i2c::ErrorType>::Error;
 //! use accelerometer::Accelerometer;
 //! use lsm6dsox::*;
 //!
 //! # fn main() {
 //! # example().unwrap();
 //! # }
-//! # fn example() -> Result<(), Error> {
+//! # fn example() -> Result<(), Error<I2cError>> {
 //! # let i2c = I2cMock::new(&Vec::new());
-//! # let delay = MockNoop::new();
+//! # let delay = NoopDelay::new();
 //! let mut lsm = lsm6dsox::Lsm6dsox::new(i2c, SlaveAddress::Low, delay);
 //!
 //! lsm.setup()?;
@@ -87,14 +87,14 @@ use accelerometer::{
     Accelerometer, RawAccelerometer,
 };
 use byteorder::{ByteOrder, LittleEndian};
-use embedded_hal::blocking::{delay::DelayMs, i2c};
+use embedded_hal::{delay::DelayNs, i2c::I2c};
 use enumflags2::BitFlags;
 
 /// Representation of a LSM6DSOX. Stores the address and device peripherals.
 pub struct Lsm6dsox<I2C, Delay>
 where
-    I2C: i2c::Write + i2c::WriteRead,
-    Delay: DelayMs<u32>,
+    I2C: I2c,
+    Delay: DelayNs,
 {
     delay: Delay,
     config: Configuration,
@@ -103,8 +103,8 @@ where
 
 impl<I2C, Delay> Lsm6dsox<I2C, Delay>
 where
-    I2C: i2c::Write + i2c::WriteRead,
-    Delay: DelayMs<u32>,
+    I2C: I2c,
+    Delay: DelayNs,
 {
     /// Create a new instance of this sensor.
     pub fn new(i2c: I2C, address: SlaveAddress, delay: Delay) -> Self {
@@ -146,7 +146,7 @@ where
     ///
     /// A software reset is performed and common settings are applied. The accelerometer and
     /// gyroscope are initialized with [`DataRate::PowerDown`].
-    pub fn setup(&mut self) -> Result<(), Error> {
+    pub fn setup(&mut self) -> Result<(), Error<I2C::Error>> {
         self.update_reg_command(Command::SwReset)?;
 
         // Give it 5 tries
@@ -188,7 +188,9 @@ where
     /// Checks the interrupt status of all possible sources.
     ///
     /// The interrupt flags will be cleared after this check, or according to the LIR mode of the specific source.
-    pub fn check_interrupt_sources(&mut self) -> Result<BitFlags<InterruptCause>, Error> {
+    pub fn check_interrupt_sources(
+        &mut self,
+    ) -> Result<BitFlags<InterruptCause>, Error<I2C::Error>> {
         let all_int_src = self.registers.read_reg(PrimaryRegister::ALL_INT_SRC)?;
         let flags = BitFlags::from_bits(all_int_src).map_err(|_| Error::InvalidData)?;
 
@@ -196,7 +198,7 @@ where
     }
 
     /// Sets both Accelerometer and Gyroscope in power-down mode.
-    pub fn power_down_mode(&mut self) -> core::result::Result<(), Error> {
+    pub fn power_down_mode(&mut self) -> core::result::Result<(), Error<I2C::Error>> {
         self.update_reg_command(Command::SetDataRateXl(DataRate::PowerDown))?;
         self.config.xl_odr = DataRate::PowerDown;
 
@@ -218,7 +220,7 @@ where
         int_src: InterruptSource,
         int_line: InterruptLine,
         active: bool,
-    ) -> Result<(), types::Error> {
+    ) -> Result<(), types::Error<I2C::Error>> {
         // TODO track interrupt mapping state in config
         //  This would allow us to automatically enable or disable interrupts globally.
 
@@ -232,12 +234,12 @@ where
     /// Enable basic interrupts
     ///
     /// Enables/disables interrupts for 6D/4D, free-fall, wake-up, tap, inactivity.
-    pub fn enable_interrupts(&mut self, enabled: bool) -> Result<(), Error> {
+    pub fn enable_interrupts(&mut self, enabled: bool) -> Result<(), Error<I2C::Error>> {
         self.update_reg_command(Command::InterruptEnable(enabled))
     }
 
     /// Updates a register according to a given [`Command`].
-    fn update_reg_command(&mut self, command: Command) -> Result<(), Error> {
+    fn update_reg_command(&mut self, command: Command) -> Result<(), Error<I2C::Error>> {
         self.registers
             .update_reg(command.register(), command.bits(), command.mask())
     }

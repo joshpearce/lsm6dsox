@@ -9,13 +9,13 @@ use measurements::AngularVelocity;
 
 impl<I2C, Delay> Lsm6dsox<I2C, Delay>
 where
-    I2C: i2c::Write + i2c::WriteRead,
-    Delay: DelayMs<u32>,
+    I2C: I2c,
+    Delay: DelayNs,
 {
     /// Sets the measurement output rate.
     ///
     /// Note: [DataRate::Freq1Hz6] is not supported by the gyroscope and will yield an [Error::InvalidData].
-    pub fn set_gyro_sample_rate(&mut self, data_rate: DataRate) -> Result<(), Error> {
+    pub fn set_gyro_sample_rate(&mut self, data_rate: DataRate) -> Result<(), Error<I2C::Error>> {
         match data_rate {
             DataRate::Freq1Hz6 => Err(Error::NotSupported),
             _ => {
@@ -29,7 +29,7 @@ where
     /// Sets the gyroscope measurement range.
     ///
     /// Values up to this scale will be reported correctly.
-    pub fn set_gyro_scale(&mut self, scale: GyroscopeScale) -> Result<(), Error> {
+    pub fn set_gyro_scale(&mut self, scale: GyroscopeScale) -> Result<(), Error<I2C::Error>> {
         self.update_reg_command(Command::SetGyroScale(scale))?;
         self.config.g_scale = scale;
         Ok(())
@@ -38,7 +38,7 @@ where
     /// Get a angular rate reading.
     ///
     /// If no data is ready returns the appropriate [Error].
-    pub fn angular_rate(&mut self) -> Result<AngularRate, Error> {
+    pub fn angular_rate(&mut self) -> Result<AngularRate, Error<I2C::Error>> {
         let data_rdy = self.registers.read_reg(PrimaryRegister::STATUS_REG)?;
         if (data_rdy & 0b0000_0010) == 0 {
             // bit 2 of STATUS_REG indicates if gyro data is available
@@ -64,7 +64,7 @@ where
     /// Get a *raw* angular rate reading.
     ///
     /// If no data is ready returns the appropriate [Error].
-    pub fn angular_rate_raw(&mut self) -> Result<RawAngularRate, Error> {
+    pub fn angular_rate_raw(&mut self) -> Result<RawAngularRate, Error<I2C::Error>> {
         let data_rdy = self.registers.read_reg(PrimaryRegister::STATUS_REG)?;
         if (data_rdy & 0b0000_0010) == 0 {
             // bit 2 of STATUS_REG indicates if gyro data is available
