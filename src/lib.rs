@@ -4,6 +4,8 @@
 // For details on the licensing terms, see the LICENSE file.
 // SPDX-License-Identifier: OLFL-1.3
 
+// Modified by JJP - removed Delay from Lsm6dsox. It's only used in set_up now.
+
 #![no_std]
 
 //! Platform-agnostic embedded-hal driver for the STMicroelectronics LSM6DSOX iNEMO inertial module.
@@ -50,10 +52,10 @@
 //! # }
 //! # fn example() -> Result<(), Error<I2cError>> {
 //! # let i2c = I2cMock::new(&Vec::new());
-//! # let delay = NoopDelay::new();
-//! let mut lsm = lsm6dsox::Lsm6dsox::new(i2c, SlaveAddress::Low, delay);
+//! # let mut delay = NoopDelay::new();
+//! let mut lsm = lsm6dsox::Lsm6dsox::new(i2c, SlaveAddress::Low);
 //!
-//! lsm.setup()?;
+//! lsm.setup(&mut delay)?;
 //! lsm.set_accel_sample_rate(DataRate::Freq52Hz)?;
 //! lsm.set_accel_scale(AccelerometerScale::Accel16g)?;
 //! if let Ok(reading) = lsm.accel_norm() {
@@ -90,26 +92,22 @@ use byteorder::{ByteOrder, LittleEndian};
 use embedded_hal::{delay::DelayNs, i2c::I2c};
 use enumflags2::BitFlags;
 
-/// Representation of a LSM6DSOX. Stores the address and device peripherals.
-pub struct Lsm6dsox<I2C, Delay>
+/// Representation of a LSM6DSOX. Stores the device peripherals and current configuration.
+pub struct Lsm6dsox<I2C>
 where
     I2C: I2c,
-    Delay: DelayNs,
 {
-    delay: Delay,
     config: Configuration,
     registers: RegisterAccess<I2C>,
 }
 
-impl<I2C, Delay> Lsm6dsox<I2C, Delay>
+impl<I2C> Lsm6dsox<I2C>
 where
     I2C: I2c,
-    Delay: DelayNs,
 {
     /// Create a new instance of this sensor.
-    pub fn new(i2c: I2C, address: SlaveAddress, delay: Delay) -> Self {
+    pub fn new(i2c: I2C, address: SlaveAddress) -> Self {
         Self {
-            delay,
             config: Configuration {
                 xl_odr: DataRate::PowerDown,
                 xl_scale: AccelerometerScale::Accel2g,
@@ -120,15 +118,15 @@ where
         }
     }
 
-    /// Destroy the sensor and return the hardware peripherals
-    pub fn destroy(self) -> (I2C, Delay) {
-        (self.registers.destroy(), self.delay)
+    /// Destroy the sensor and return the underlying I²C interface.
+    pub fn destroy(self) -> I2C {
+        self.registers.destroy()
     }
 
-    /// Check whether the configured Sensor returns its correct id.
+    /// Check whether the configured sensor returns its correct id.
     ///
-    /// Returns `Ok(id)` if `id` matches the Standard LSM6DSOX id,
-    /// `Err(Some(id))` or `Err(None)` if `id` doesn't match or couldn't be read.
+    /// Returns `Ok(id)` if `id` matches the standard LSM6DSOX id,
+    /// `Err(Some(id))` if the id doesn't match, or `Err(None)` if it couldn't be read.
     pub fn check_id(&mut self) -> Result<u8, Option<u8>> {
         match self.registers.read_reg(PrimaryRegister::WHO_AM_I) {
             Ok(val) => {
@@ -144,16 +142,21 @@ where
 
     /// Initializes the sensor.
     ///
-    /// A software reset is performed and common settings are applied. The accelerometer and
-    /// gyroscope are initialized with [`DataRate::PowerDown`].
-    pub fn setup(&mut self) -> Result<(), Error<I2C::Error>> {
+    /// Performs a software reset and applies common settings.
+    /// The accelerometer and gyroscope are initialized with [`DataRate::PowerDown`].
+    ///
+    /// This method takes a mutable reference to a delay implementation.
+    pub fn setup<Delay>(&mut self, delay: &mut Delay) -> Result<(), Error<I2C::Error>>
+    where
+        Delay: DelayNs,
+    {
         self.update_reg_command(Command::SwReset)?;
 
-        // Give it 5 tries
-        // A delay is necessary here, otherwise reset may never finish because the lsm is too busy.
+        // Give it 5 tries.
+        // A delay is necessary here, otherwise reset may never finish because the LSM6DSOX is too busy.
         let mut ctrl3_c_val = 0xFF;
         for _ in 0..5 {
-            self.delay.delay_ms(10);
+            delay.delay_ms(10);
             ctrl3_c_val = self.registers.read_reg(PrimaryRegister::CTRL3_C)?;
             if ctrl3_c_val & 1 == 0 {
                 break;
@@ -178,8 +181,8 @@ where
             self.set_gyro_sample_rate(self.config.g_odr)?;
             self.set_gyro_scale(self.config.g_scale)?;
 
-            /* Wait stable output */
-            self.delay.delay_ms(100);
+            /* Wait for stable output */
+            delay.delay_ms(100);
 
             Ok(())
         }
@@ -197,7 +200,7 @@ where
         Ok(flags)
     }
 
-    /// Sets both Accelerometer and Gyroscope in power-down mode.
+    /// Sets both the accelerometer and gyroscope into power-down mode.
     pub fn power_down_mode(&mut self) -> core::result::Result<(), Error<I2C::Error>> {
         self.update_reg_command(Command::SetDataRateXl(DataRate::PowerDown))?;
         self.config.xl_odr = DataRate::PowerDown;
@@ -208,9 +211,9 @@ where
         Ok(())
     }
 
-    /// Maps an available interrupt source to a available interrupt line.
+    /// Maps an available interrupt source to a specific interrupt line.
     ///
-    /// Toggles whether a interrupt source will generate interrupts on the specified line.
+    /// Toggles whether an interrupt source will generate interrupts on the specified line.
     ///
     /// Note: Interrupt sources [SHUB](InterruptSource::SHUB) and [Timestamp](InterruptSource::Timestamp) are not available on both [interrupt lines](InterruptLine).
     ///
@@ -221,8 +224,8 @@ where
         int_line: InterruptLine,
         active: bool,
     ) -> Result<(), types::Error<I2C::Error>> {
-        // TODO track interrupt mapping state in config
-        //  This would allow us to automatically enable or disable interrupts globally.
+        // TODO: Track interrupt mapping state in the configuration
+        //       This would allow us to automatically enable or disable interrupts globally.
 
         match (int_line, int_src) {
             (InterruptLine::INT1, InterruptSource::Timestamp) => Err(Error::NotSupported),
@@ -231,27 +234,25 @@ where
         }
     }
 
-    /// Enable basic interrupts
+    /// Enables or disables basic interrupts.
     ///
-    /// Enables/disables interrupts for 6D/4D, free-fall, wake-up, tap, inactivity.
+    /// This enables/disables interrupts for 6D/4D, free-fall, wake-up, tap, and inactivity.
     pub fn enable_interrupts(&mut self, enabled: bool) -> Result<(), Error<I2C::Error>> {
         self.update_reg_command(Command::InterruptEnable(enabled))
     }
 
-    /// Updates a register according to a given [`Command`].
+    /// Updates a register according to the provided [`Command`].
     fn update_reg_command(&mut self, command: Command) -> Result<(), Error<I2C::Error>> {
         self.registers
             .update_reg(command.register(), command.bits(), command.mask())
     }
 
-    /// Gives direct access to the internal sensor registers
+    /// Provides direct access to the internal sensor registers.
     ///
     /// # Safety
-    /// Directly accessing the internal registers may misconfigure the sensor or invalidate some
-    /// of the assumptions made in the driver implementation. It is mainly provided to allow
-    /// configuring the machine learning core with a configuration generated from an external tool
-    /// but it may also be useful for testing, debugging, prototyping or to use features which have
-    /// not been implemented on a higher level.
+    ///
+    /// Direct register access may misconfigure the sensor or invalidate some of the driver's assumptions.
+    /// It is provided mainly for testing, debugging, or advanced configuration scenarios.
     pub unsafe fn register_access(&mut self) -> &mut RegisterAccess<I2C> {
         &mut self.registers
     }
