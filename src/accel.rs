@@ -4,14 +4,15 @@
 // For details on the licensing terms, see the LICENSE file.
 // SPDX-License-Identifier: OLFL-1.3
 
+// Modified by JJP - removed Delay from Lsm6dsox. It's only used in set_up now.
+
 use core::convert::TryFrom;
 
 use super::*;
 
-impl<I2C, Delay> Accelerometer for Lsm6dsox<I2C, Delay>
+impl<I2C> Accelerometer for Lsm6dsox<I2C>
 where
     I2C: I2c,
-    Delay: DelayNs,
 {
     type Error = Error<I2C::Error>;
 
@@ -55,10 +56,9 @@ where
     }
 }
 
-impl<I2C, Delay> RawAccelerometer<I16x3> for Lsm6dsox<I2C, Delay>
+impl<I2C> RawAccelerometer<I16x3> for Lsm6dsox<I2C>
 where
     I2C: I2c,
-    Delay: DelayNs,
 {
     type Error = Error<I2C::Error>;
 
@@ -89,10 +89,9 @@ where
     }
 }
 
-impl<I2C, Delay> Lsm6dsox<I2C, Delay>
+impl<I2C> Lsm6dsox<I2C>
 where
     I2C: I2c,
-    Delay: DelayNs,
 {
     /// Sets the measurement output rate.
     pub fn set_accel_sample_rate(&mut self, data_rate: DataRate) -> Result<(), Error<I2C::Error>> {
